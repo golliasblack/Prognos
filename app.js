@@ -436,7 +436,7 @@ document.addEventListener("drop",e=>{if(e.dataTransfer?.files?.length)addFiles(e
 $("newc").onclick=()=>{if(busy)return;CONV=newConv();renderThread();renderSide();closeSide();$("inp").focus()};
 $("menuBtn").onclick=()=>$("side").classList.toggle("open");function closeSide(){$("side").classList.remove("open")}
 $("logout").onclick=()=>logout(false);
-$("themeBtn").onclick=()=>{const r=document.documentElement,cur=r.dataset.theme||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"),nx=cur==="dark"?"light":"dark";r.dataset.theme=nx;store.set("prognos.theme",nx)};
+$("themeBtn").onclick=()=>{const r=document.documentElement,cur=r.dataset.theme||"dark",nx=cur==="dark"?"light":"dark";r.dataset.theme=nx;store.set("prognos.theme",nx)};
 {const t=store.get("prognos.theme");if(t)document.documentElement.dataset.theme=t}
 try{const t=store.get("prognos.tier");if(t)$("tier").value=t}catch(e){}$("tier").onchange=()=>store.set("prognos.tier",$("tier").value);
 
@@ -444,15 +444,27 @@ try{const t=store.get("prognos.tier");if(t)$("tier").value=t}catch(e){}$("tier")
 async function refreshIA(){try{const t=await token();const r=await fetch(`${SB_URL}/functions/v1/ia`,{method:"POST",headers:{apikey:SB_KEY,Authorization:"Bearer "+t,"Content-Type":"application/json"},body:JSON.stringify({acao:"status"})});const j=await r.json();
   const ps=j.provedores||[];$("iaStat").innerHTML=ps.length?`IAs: ${ps.map(p=>`<b>${esc(p.nome)}</b>${p.pausado?" (sem cota)":""}`).join(" → ")}`:"IAs: nenhuma chave cadastrada no Supabase"}catch(e){$("iaStat").textContent="IAs: status indisponível"}}
 async function refreshKB(){try{const r=await rpc("resumo_base");$("kbStat").innerHTML=`Base da planta: <b>${(+r.lidos).toLocaleString("pt-BR")}</b> de ${(+r.arquivos).toLocaleString("pt-BR")} arquivos lidos · <b>${(+r.trechos).toLocaleString("pt-BR")}</b> trechos · <b>${(+r.eventos).toLocaleString("pt-BR")}</b> eventos`}catch(e){$("kbStat").textContent="Base da planta indisponível"}}
-let signup=false;
+let signup=false,recovery=false;
+const APP_URL=location.origin+location.pathname;
+async function getUser(access){const r=await fetch(`${SB_URL}/auth/v1/user`,{headers:{apikey:SB_KEY,Authorization:"Bearer "+access}});return r.ok?r.json():null}
+/* volta do link do e-mail (confirmação ou nova senha): a sessão vem no endereço */
+async function lerRetornoEmail(){const h=new URLSearchParams(location.hash.slice(1));if(!h.size)return"";history.replaceState(null,"",APP_URL);
+  if(h.get("error")||h.get("error_code"))return h.get("error_code")==="otp_expired"?"Este link já foi usado ou expirou. Se você já confirmou o e-mail, é só entrar com sua senha.":"Não foi possível validar o link: "+(h.get("error_description")||h.get("error")).replace(/\+/g," ");
+  if(h.get("access_token")){const j={access_token:h.get("access_token"),refresh_token:h.get("refresh_token"),expires_in:+h.get("expires_in")||3600};j.user=await getUser(j.access_token);setSess(j);
+    if(h.get("type")==="recovery"){recovery=true;return"recovery"}return"E-mail confirmado. Bem-vindo ao Prognos."}return""}
 function showLogin(msg){$("login").hidden=false;$("lmsg").textContent=msg||"";$("lemail").focus()}
 $("lswap").onclick=()=>{signup=!signup;$("lt").textContent=signup?"Criar conta":"Entrar";$("lgo").textContent=signup?"Criar conta":"Entrar";$("lswap").textContent=signup?"Já tenho conta. Entrar":"Primeiro acesso? Criar conta";$("lpass").autocomplete=signup?"new-password":"current-password"};
 $("lform").onsubmit=async e=>{e.preventDefault();const email=$("lemail").value.trim(),password=$("lpass").value;$("lgo").disabled=true;$("lmsg").textContent=signup?"Criando conta…":"Entrando…";
-  try{if(signup){const j=await authCall("signup",{email,password});if(j.access_token){setSess(j);await boot()}else{$("lmsg").textContent="Conta criada. Abra o e-mail de confirmação e depois entre aqui.";signup=true;$("lswap").click()}}
+  if(recovery){try{const t=await token();const r=await fetch(`${SB_URL}/auth/v1/user`,{method:"PUT",headers:{apikey:SB_KEY,Authorization:"Bearer "+t,"Content-Type":"application/json"},body:JSON.stringify({password})});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).msg||"erro "+r.status);recovery=false;$("lemail").hidden=false;$("lemail").required=true;await boot()}catch(err){$("lmsg").textContent=err.message}$("lgo").disabled=false;return}
+  try{if(signup){const j=await authCall(`signup?redirect_to=${encodeURIComponent(APP_URL)}`,{email,password});if(j.access_token){setSess(j);await boot()}else{$("lmsg").textContent="Conta criada. Abra o e-mail de confirmação e depois entre aqui.";signup=true;$("lswap").click()}}
     else{setSess(await authCall("token?grant_type=password",{email,password}));await boot()}}
   catch(err){$("lmsg").textContent=/confirm/i.test(err.message)?"Confirme seu e-mail pelo link que enviamos e tente de novo.":/invalid/i.test(err.message)?"E-mail ou senha incorretos.":err.message}
   $("lgo").disabled=false};
+$("lreset").onclick=async()=>{const email=$("lemail").value.trim();if(!email){$("lmsg").textContent="Digite seu e-mail acima e clique de novo em Esqueci a senha.";$("lemail").focus();return}
+  try{await authCall(`recover?redirect_to=${encodeURIComponent(APP_URL)}`,{email});$("lmsg").textContent="Enviamos um link para criar uma nova senha. Abra o e-mail."}catch(err){$("lmsg").textContent=err.message}};
 async function boot(){if(!SESS){showLogin();return}try{await token()}catch(e){return}UID=SESS.user?.id;$("whoMail").textContent=SESS.user?.email||"";
   let ok=false;try{ok=await rpc("sou_membro")}catch(e){}if(ok!==true){showLogin("Este e-mail ainda não está autorizado no Prognos. Peça ao administrador para incluí-lo.");return}
   $("login").hidden=true;CONV=newConv();renderThread();await listConvs();refreshKB();refreshIA();$("inp").focus()}
-boot();
+(async()=>{const r=await lerRetornoEmail();
+  if(r==="recovery"){showLogin("Digite sua nova senha.");$("lt").textContent="Nova senha";$("lgo").textContent="Salvar senha";$("lemail").hidden=true;$("lemail").required=false;$("lswap").hidden=true;$("lpass").autocomplete="new-password";$("lpass").focus();return}
+  await boot();if(r&&!$("login").hidden&&!$("lmsg").textContent)$("lmsg").textContent=r;else if(r&&$("login").hidden===false)$("lmsg").textContent=r+" "+$("lmsg").textContent})();
