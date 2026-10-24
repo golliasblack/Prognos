@@ -100,7 +100,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .step.run{animation:blink 1.4s ease-in-out infinite}
 @keyframes blink{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.step.run{animation:none}}
-.prov{font:11px var(--m);color:var(--mute);margin-top:4px}
+.prov{display:none}
 .src a{color:var(--fg);text-underline-offset:2px}
 .err{border:1px solid var(--hard);border-radius:8px;padding:10px 12px;font-size:14px;margin:8px 0}
 /* cartões */
@@ -144,6 +144,21 @@ button,input,select,textarea{font:inherit;color:inherit}
 .params input{border:1px solid var(--line);border-radius:6px;padding:4px 7px;background:var(--bg);font:13px var(--m)}
 .params input.est{border-style:dashed;border-color:var(--hard)}
 .note{font-size:12.5px;color:var(--mute);padding:8px 14px;margin:0;border-top:1px solid var(--line)}
+/* base da planta */
+.basebar{display:flex;flex-direction:column;gap:6px}
+.basebar .lin{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.prog{height:3px;background:var(--line);border-radius:3px;overflow:hidden}
+.prog i{display:block;height:100%;background:var(--metal);transition:width .4s}
+.onb{border:1px solid var(--line);border-radius:16px;padding:22px 22px 18px;margin:0 0 22px;background:linear-gradient(160deg,color-mix(in srgb,var(--fg) 6%,transparent),transparent 70%),var(--soft);box-shadow:var(--glow)}
+.onb .st{font:11px var(--m);letter-spacing:.24em;text-transform:uppercase;color:var(--mute);margin:0 0 8px}
+.onb h3{margin:0 0 6px;font:400 18px/1.35 var(--d);letter-spacing:.04em}
+.onb p{margin:0 0 14px;color:var(--mute);font-size:14px}
+.onb ul{margin:0 0 16px;padding-left:18px;color:var(--mute);font-size:13.5px}
+.onb .acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.onb .big{background:var(--metal);color:var(--inv);border:0;border-radius:10px;padding:11px 18px;font-weight:700;letter-spacing:.03em;cursor:pointer}
+.onb .num{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:12px 0}
+.onb .num b{display:block;font:600 20px var(--f);font-variant-numeric:tabular-nums}
+.onb .num small{font:11px var(--m);color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
 /* composer */
 .comp{padding:10px 0 calc(14px + env(safe-area-inset-bottom,0px))}
 .box{border:1px solid var(--line);border-radius:16px;background:var(--soft);padding:8px 8px 8px 12px;box-shadow:var(--glow);transition:border-color .2s}
@@ -205,8 +220,7 @@ button,input,select,textarea{font:inherit;color:inherit}
     <button class="newc" id="newc">Nova conversa</button>
     <nav class="convs" id="convs"></nav>
     <div class="sidefoot">
-      <div class="kb" id="kbStat">Base da planta: conectando…</div>
-      <div class="kb" id="iaStat">IAs: verificando…</div>
+      <div class="kb" id="kbStat"></div>
       <div class="who"><span id="whoMail"></span><button class="link" id="logout">Sair</button></div>
       <div class="who"><button class="link" id="themeBtn">Tema</button><span class="mono" style="font-size:11px">Technology Ahead of Time</span></div>
     </div>
@@ -254,6 +268,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 </div>
 
 <script src="lib.js"></script>
+<script src="base.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
