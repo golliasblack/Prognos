@@ -161,6 +161,17 @@ button,input,select,textarea{font:inherit;color:inherit}
 .onb .num{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:12px 0}
 .onb .num b{display:block;font:600 20px var(--f);font-variant-numeric:tabular-nums}
 .onb .num small{font:11px var(--m);color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
+/* administração */
+.adm{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);display:grid;place-items:center;padding:16px}
+.admbox{width:min(1180px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--glow);overflow:hidden}
+.admbox header{display:flex;justify-content:space-between;align-items:flex-start;padding:18px 20px 8px}
+.admbox h2{margin:0;font:400 20px var(--d);letter-spacing:.06em}
+.admbox .st{font:11px var(--m);letter-spacing:.24em;text-transform:uppercase;color:var(--mute);margin:0 0 4px}
+.admk{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--line);border-block:1px solid var(--line)}
+.admk div{background:var(--soft);padding:10px 16px}.admk b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.admk small{font:11px var(--m);color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
+.admbar{display:flex;gap:12px;align-items:center;padding:12px 20px}.admbar input{flex:1;border:1px solid var(--line);border-radius:9px;padding:9px 12px;background:var(--soft)}
+.admt{max-height:none;flex:1;padding:0 8px 12px}.admt td .btn{margin:2px 4px 2px 0}
+.tag{display:inline-block;font:11px var(--m);border:1px solid var(--line);border-radius:5px;padding:1px 6px;margin:1px 4px 1px 0}.tag.bl{background:var(--hard);color:var(--inv);border-color:var(--hard)}
 /* composer */
 .comp{padding:10px 0 calc(14px + env(safe-area-inset-bottom,0px))}
 .box{border:1px solid var(--line);border-radius:16px;background:var(--soft);padding:8px 8px 8px 12px;box-shadow:var(--glow);transition:border-color .2s}
@@ -224,6 +235,7 @@ button,input,select,textarea{font:inherit;color:inherit}
     <div class="sidefoot">
       <div class="kb" id="kbStat"></div>
       <div class="who"><span id="whoOrg"></span><button class="link" id="trocaUni">Unidade</button></div>
+      <div class="who" id="admLin" hidden><span>Administração</span><button class="link" id="admBtn">Abrir</button></div>
       <div class="who"><span id="whoMail"></span><button class="link" id="logout">Sair</button></div>
       <div class="who"><button class="link" id="themeBtn">Tema</button><span class="mono" style="font-size:11px">Technology Ahead of Time</span></div>
     </div>
@@ -250,6 +262,15 @@ button,input,select,textarea{font:inherit;color:inherit}
       <div class="hintline">O Prognos estima probabilidades. Confirme em campo antes de agir. Segurança primeiro.</div>
     </div></div>
   </main>
+</div>
+
+<div class="adm" id="adm" hidden role="dialog" aria-label="Administração">
+  <div class="admbox">
+    <header><div><p class="st">Black and White · Prognos</p><h2 id="admTit">Administração</h2></div><button class="link" id="admFechar">Fechar</button></header>
+    <div class="admk" id="admK"></div>
+    <div class="admbar"><input id="admBusca" placeholder="Buscar por e-mail, nome, empresa ou unidade"><span class="kb" id="admMsg"></span></div>
+    <div class="scroll admt"><table class="tbl"><thead><tr><th>Usuário</th><th>Empresa · unidade</th><th>Entrou</th><th>Último acesso</th><th>IA hoje / 30 d</th><th>Situação</th><th></th></tr></thead><tbody id="admRows"></tbody></table></div>
+  </div>
 </div>
 
 <div class="login" id="login" hidden>

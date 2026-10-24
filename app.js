@@ -520,7 +520,32 @@ async function boot(){if(!SESS){showLogin();return}try{await token()}catch(e){re
   let ok=false;try{ok=await rpc("sou_membro")}catch(e){}if(ok!==true){showLogin("Não foi possível liberar o acesso desta conta. Fale com o suporte Black and White.");return}
   try{PERFIL=await rpc("meu_perfil")}catch(e){PERFIL=null}
   if(!PERFIL){const m=SESS.user?.user_metadata||{};if(m.empresa&&m.unidade){try{await salvarPerfil(m.empresa,m.unidade,m.nome)}catch(e){}}if(!PERFIL){pedirPerfil("Informe a empresa e a unidade onde você trabalha. A base da planta é compartilhada com os colegas da mesma unidade.");return}}
-  mostraOrg();$("login").hidden=true;CONV=newConv();renderThread();await listConvs();if(!BASE.ouvintes.size){BASE.ouvintes.add(renderBase);baseIniciar()}renderBase();$("inp").focus()}
+  mostraOrg();admIniciar();$("login").hidden=true;CONV=newConv();renderThread();await listConvs();if(!BASE.ouvintes.size){BASE.ouvintes.add(renderBase);baseIniciar()}renderBase();$("inp").focus()}
 (async()=>{const r=await lerRetornoEmail();
   if(r==="recovery"){showLogin("Digite sua nova senha.");$("lt").textContent="Nova senha";$("lgo").textContent="Salvar senha";$("lemail").hidden=true;$("lemail").required=false;$("lswap").hidden=true;$("lpass").autocomplete="new-password";$("lpass").focus();return}
   await boot();if(r&&!$("login").hidden&&!$("lmsg").textContent)$("lmsg").textContent=r;else if(r&&$("login").hidden===false)$("lmsg").textContent=r+" "+$("lmsg").textContent})();
+
+/* ======================= ADMINISTRAÇÃO ======================= */
+let PAPEL=null;
+async function admIniciar(){try{PAPEL=await rpc("meu_papel")}catch(e){PAPEL=null}const ok=PAPEL&&(PAPEL.master||(PAPEL.unidades||[]).length);$("admLin").hidden=!ok;
+  if(ok)$("admLin").querySelector("span").textContent=PAPEL.master?"Administração · master":"Administração · "+PAPEL.unidades.join(", ")}
+const dt=t=>t?new Date(t).toLocaleDateString("pt-BR"):"—";
+async function admCarregar(){const busca=$("admBusca").value.trim();$("admMsg").textContent="Carregando…";
+  try{const [res,us]=await Promise.all([rpc("admin_resumo"),rpc("admin_usuarios",{busca:busca||null})]);
+    const K=PAPEL.master?[["usuarios","Usuários"],["confirmados","Confirmados"],["ativos_7d","Ativos 7 dias"],["empresas","Empresas"],["unidades","Unidades"],["ia_hoje","Mensagens de IA hoje"],["eventos","Eventos de falha"],["rede","Lições na rede"],["bloqueados","Bloqueados"]]:[["usuarios","Usuários da unidade"],["ia_hoje","Mensagens de IA hoje"],["eventos","Eventos de falha"]];
+    $("admK").innerHTML=K.map(([k,n])=>`<div><b>${fmtN(res?.[k])}</b><small>${n}</small></div>`).join("");
+    $("admRows").innerHTML=(us||[]).map(u=>`<tr><td><b>${esc(u.nome||"—")}</b><div class="p">${esc(u.email)}${u.confirmado?"":" · não confirmado"}</div></td>
+      <td>${esc(u.empresa||"—")}${u.unidade?" · "+esc(u.unidade):""}${u.dominio?"":`<div class="p">e-mail pessoal: base não compartilhada</div>`}</td>
+      <td class="n">${dt(u.criado_em)}</td><td class="n">${dt(u.ultimo_acesso)}</td><td class="n">${fmtN(u.uso_hoje)} / ${fmtN(u.uso_30d)}</td>
+      <td>${u.papel?`<span class="tag">${esc(u.papel)}</span>`:""}${u.bloqueado?`<span class="tag bl">bloqueado</span>`:""}${!u.papel&&!u.bloqueado?`<span class="tag">ativo</span>`:""}</td>
+      <td>${u.papel==="master"||u.usuario===UID?"":`<button class="btn" data-a="${u.bloqueado?"desbloquear":"bloquear"}" data-u="${u.usuario}">${u.bloqueado?"Desbloquear":"Bloquear"}</button>`}
+        ${PAPEL.master&&u.papel!=="master"&&u.unidade_id?`<button class="btn" data-a="${u.papel?"tiraradm":"daradm"}" data-u="${u.usuario}">${u.papel?"Remover admin":"Tornar admin da unidade"}</button>`:""}</td></tr>`).join("")||`<tr><td colspan="7">Nenhum usuário encontrado.</td></tr>`;
+    $("admMsg").textContent=`${fmtN(us.length)} usuário(s)`}catch(e){$("admMsg").textContent="Erro: "+String(e.message).slice(0,160)}}
+$("admBtn").onclick=()=>{$("adm").hidden=false;admCarregar()};
+$("admFechar").onclick=()=>{$("adm").hidden=true};
+$("adm").onclick=e=>{if(e.target.id==="adm")$("adm").hidden=true};
+let admT=null;$("admBusca").oninput=()=>{clearTimeout(admT);admT=setTimeout(admCarregar,350)};
+$("admRows").onclick=async e=>{const b=e.target.closest("[data-a]");if(!b)return;const a=b.dataset.a,u=b.dataset.u;b.disabled=true;
+  try{if(a==="bloquear"){const m=prompt("Motivo do bloqueio (opcional):","");if(m===null){b.disabled=false;return}await rpc("admin_bloquear",{alvo:u,bloquear:true,motivo:m||null})}
+    else if(a==="desbloquear")await rpc("admin_bloquear",{alvo:u,bloquear:false});
+    else await rpc("admin_definir_admin_unidade",{alvo:u,ativo:a==="daradm"});await admCarregar()}catch(err){$("admMsg").textContent="Erro: "+String(err.message).replace(/^.*"message":"([^"]+)".*$/,"$1").slice(0,160);b.disabled=false}};
