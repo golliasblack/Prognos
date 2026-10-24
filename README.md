@@ -9,4 +9,4 @@ Copiloto de manutenção e operação industrial. Uma tela de chat: você conver
 - alarmes (ISA-18.2) e malhas de controle;
 - revisão de programas de CLP;
 - engenharia reversa de peça em 2D e 3D;
-- retorno de campo, que é como o sistema aprende.
+- retorno de campo, que é como o sistema aprende
