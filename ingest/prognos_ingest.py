@@ -133,7 +133,7 @@ class Base:
     def upsert_arquivo(self, row):
         if self.seco:
             return 0
-        r = self._req("POST", "arquivos?on_conflict=caminho", [row], {"Prefer": "resolution=merge-duplicates,return=representation"})
+        r = self._req("POST", "arquivos?on_conflict=dono,caminho", [row], {"Prefer": "resolution=merge-duplicates,return=representation"})
         return r[0]["id"]
 
     def trocar_trechos(self, rid, trechos):
@@ -147,7 +147,7 @@ class Base:
         if self.seco or not evs:
             return
         for i in range(0, len(evs), 300):
-            self._req("POST", "eventos?on_conflict=chave", evs[i:i + 300], {"Prefer": "resolution=ignore-duplicates,return=minimal"})
+            self._req("POST", "eventos?on_conflict=dono,chave", evs[i:i + 300], {"Prefer": "resolution=ignore-duplicates,return=minimal"})
 
     def ia(self, prompt, tier="quick", max_tokens=4000, imagens=None):
         conteudo = []

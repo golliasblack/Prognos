@@ -174,7 +174,7 @@ Deno.serve(async (req) => {
   const auth = req.headers.get("Authorization") ?? "";
   const m = await fetch(`${env("SUPABASE_URL")}/rest/v1/rpc/sou_membro`, { method: "POST", headers: { apikey: env("SUPABASE_ANON_KEY"), Authorization: auth, "Content-Type": "application/json" }, body: "{}" });
   if (!m.ok) return json(401, { code: "session_expired", message: "Sessão inválida" });
-  if ((await m.json()) !== true) return json(403, { code: "not_granted", message: "Usuário não autorizado no Prognos" });
+  if ((await m.json()) !== true) return json(403, { code: "not_granted", message: "Usuário bloqueado no Prognos" });
 
   let b: any;
   try { b = await req.json(); } catch { return json(400, { code: "invalid_request", message: "JSON inválido" }); }
@@ -182,6 +182,11 @@ Deno.serve(async (req) => {
   if (b.acao === "status") return json(200, { provedores: ativos.map((p) => ({ id: p.id, nome: p.nome, modelo: p.modelo, visao: p.visao, pausado: pausado(p.id) })) });
   if (!ativos.length) return json(503, { code: "sampling_disabled", message: "Nenhuma chave de IA cadastrada. Cadastre pelo menos uma em Supabase → Edge Functions → Secrets (ex.: GROQ_API_KEY)." });
   if (!Array.isArray(b.messages) || !b.messages.length) return json(400, { code: "invalid_request", message: "messages vazio" });
+
+  // cota diária por pessoa: as chaves grátis são compartilhadas por todos os usuários
+  const limite = Number(env("LIMITE_DIARIO_IA")) || 300;
+  const u = await fetch(`${env("SUPABASE_URL")}/rest/v1/rpc/registrar_uso_ia`, { method: "POST", headers: { apikey: env("SUPABASE_ANON_KEY"), Authorization: auth, "Content-Type": "application/json" }, body: "{}" });
+  if (u.ok && Number(await u.json()) > limite) return json(429, { code: "cota_diaria", message: `Você atingiu o limite de ${limite} mensagens de IA de hoje. A cota volta amanhã.` });
 
   const stream = b.stream !== false, img = temImagem(b), rapido = b.tier === "quick";
   let fila = ativos.filter((p) => !pausado(p.id));
