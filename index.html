@@ -2,6 +2,8 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' https://hxzgorearzxtvippjhjg.supabase.co; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Prognos · Black and White</title>
 <meta name="description" content="Prognos, copiloto de manutenção e operação industrial da Black and White.">
@@ -221,6 +223,7 @@ button,input,select,textarea{font:inherit;color:inherit}
     <nav class="convs" id="convs"></nav>
     <div class="sidefoot">
       <div class="kb" id="kbStat"></div>
+      <div class="who"><span id="whoOrg"></span><button class="link" id="trocaUni">Unidade</button></div>
       <div class="who"><span id="whoMail"></span><button class="link" id="logout">Sair</button></div>
       <div class="who"><button class="link" id="themeBtn">Tema</button><span class="mono" style="font-size:11px">Technology Ahead of Time</span></div>
     </div>
@@ -256,7 +259,11 @@ button,input,select,textarea{font:inherit;color:inherit}
       <p class="pt">PROGNOS</p>
       <p class="ps">Black and White</p>
       <h2 id="lt">Entrar</h2>
-      <input id="lemail" type="email" autocomplete="username" placeholder="E-mail" required>
+      <input id="lnome" class="pf" autocomplete="name" placeholder="Seu nome" hidden>
+      <input id="lempresa" class="pf" autocomplete="organization" placeholder="Empresa (ex.: ArcelorMittal)" hidden>
+      <input id="lunidade" class="pf" list="lunidades" placeholder="Unidade (ex.: Resende, Barra Mansa, Sabará)" hidden>
+      <datalist id="lunidades"></datalist>
+      <input id="lemail" type="email" autocomplete="username" placeholder="E-mail (use o corporativo para compartilhar a base)" required>
       <input id="lpass" type="password" autocomplete="current-password" placeholder="Senha (mínimo 8 caracteres)" minlength="8" required>
       <button class="go" id="lgo" type="submit">Entrar</button>
       <div class="msgl" id="lmsg" role="status"></div>

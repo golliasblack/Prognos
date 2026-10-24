@@ -344,8 +344,6 @@ function toCQ(){const M=CAD.model;let s=`# ${M.nome||"Peça"}\n# Gerado pelo Pro
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 const loaded={};
 function loadScript(u){return loaded[u]||(loaded[u]=new Promise((res,rej)=>{const s=document.createElement("script");s.src=u;s.onload=res;s.onerror=()=>{delete loaded[u];rej(new Error("não consegui carregar o leitor deste formato"))};document.head.append(s)}))}
-const LIBS={pdf:["https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js","https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"],
-  docx:["https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"],xlsx:["https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"],
-  zip:["https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"]};
+const LIBS={pdf:["vendor/pdf.worker.min.js","vendor/pdf.min.js"],docx:["vendor/mammoth.browser.min.js"],xlsx:["vendor/xlsx.full.min.js"],zip:["vendor/jszip.min.js"]}; /* bibliotecas hospedadas no próprio site: nenhum script de terceiros */
 async function need(k){for(const u of LIBS[k])await loadScript(u)}
 const LIB={};RAW.forEach(r=>LIB[r[0]]={k:r[0],n:r[1],cat:r[2],beta:r[3],eta:r[4],kLoad:r[5],cls:r[6],modos:r[7],pf:r[8],tec:r[9]});

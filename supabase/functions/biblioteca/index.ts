@@ -4,7 +4,8 @@
 // Open Library / Internet Archive (livros em domínio público), Projeto Gutenberg e Wikipédia (pt e en).
 
 const CORS = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": Deno.env.get("APP_ORIGEM") ?? "https://golliasblack.github.io",
+  "Vary": "Origin",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Expose-Headers": "x-prognos-total, x-prognos-tipo",

@@ -4,27 +4,36 @@
 // Ordem: segredo IA_ORDEM (ex.: "groq,cerebras,openrouter,github,gemini,mistral,anthropic").
 // Modelo de cada provedor: segredo MODELO_<PROVEDOR> (ex.: MODELO_GROQ).
 
+const env = (k: string) => Deno.env.get(k) ?? "";
 const CORS = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": Deno.env.get("APP_ORIGEM") ?? "https://golliasblack.github.io",
+  "Vary": "Origin",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Expose-Headers": "x-prognos-model, x-prognos-provedor, x-prognos-tentativas",
 };
-const env = (k: string) => Deno.env.get(k) ?? "";
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
 type Prov = { id: string; nome: string; tipo: "anthropic" | "openai"; base: string; chave: string; modelo: string; modeloRapido?: string; visao: boolean; extra?: Record<string, string> };
+// Todos com plano grátis sem cartão (conferido em out/2026), exceto onde indicado.
 const PROVEDORES: any[] = [
-  { id: "groq", nome: "Groq", tipo: "openai", base: "https://api.groq.com/openai/v1", chaveEnv: "GROQ_API_KEY", modeloPadrao: "openai/gpt-oss-120b", rapidoPadrao: "llama-3.1-8b-instant", visao: false },
-  { id: "cerebras", nome: "Cerebras", tipo: "openai", base: "https://api.cerebras.ai/v1", chaveEnv: "CEREBRAS_API_KEY", modeloPadrao: "gpt-oss-120b", visao: false },
-  { id: "openrouter", nome: "OpenRouter", tipo: "openai", base: "https://openrouter.ai/api/v1", chaveEnv: "OPENROUTER_API_KEY", modeloPadrao: "openai/gpt-oss-120b:free", visao: false, extra: { "HTTP-Referer": "https://golliasblack.github.io/prognos/", "X-Title": "Prognos" } },
+  { id: "groq", nome: "Groq", tipo: "openai", base: "https://api.groq.com/openai/v1", chaveEnv: "GROQ_API_KEY", modeloPadrao: "openai/gpt-oss-120b", rapidoPadrao: "openai/gpt-oss-20b", visao: false },
+  { id: "gemini", nome: "Google Gemini", tipo: "openai", base: "https://generativelanguage.googleapis.com/v1beta/openai", chaveEnv: "GEMINI_API_KEY", modeloPadrao: "gemini-2.5-flash", rapidoPadrao: "gemini-2.5-flash", visao: true },
+  { id: "nvidia", nome: "NVIDIA", tipo: "openai", base: "https://integrate.api.nvidia.com/v1", chaveEnv: "NVIDIA_API_KEY", modeloPadrao: "openai/gpt-oss-120b", rapidoPadrao: "openai/gpt-oss-20b", visao: false },
+  { id: "cloudflare", nome: "Cloudflare", tipo: "openai", base: () => `https://api.cloudflare.com/client/v4/accounts/${env("CLOUDFLARE_ACCOUNT_ID")}/ai/v1`, chaveEnv: "CLOUDFLARE_API_TOKEN", exige: ["CLOUDFLARE_ACCOUNT_ID"], modeloPadrao: "@cf/openai/gpt-oss-120b", rapidoPadrao: "@cf/openai/gpt-oss-20b", visao: false },
   { id: "github", nome: "GitHub Models", tipo: "openai", base: "https://models.github.ai/inference", chaveEnv: "GITHUB_MODELS_TOKEN", modeloPadrao: "openai/gpt-4.1", rapidoPadrao: "openai/gpt-4.1-mini", visao: true },
-  { id: "gemini", nome: "Google Gemini", tipo: "openai", base: "https://generativelanguage.googleapis.com/v1beta/openai", chaveEnv: "GEMINI_API_KEY", modeloPadrao: "gemini-2.5-flash", rapidoPadrao: "gemini-2.5-flash-lite", visao: true },
+  { id: "ollama", nome: "Ollama Cloud", tipo: "openai", base: "https://ollama.com/v1", chaveEnv: "OLLAMA_API_KEY", modeloPadrao: "gpt-oss:120b", rapidoPadrao: "gpt-oss:20b", visao: false },
+  { id: "openrouter", nome: "OpenRouter", tipo: "openai", base: "https://openrouter.ai/api/v1", chaveEnv: "OPENROUTER_API_KEY", modeloPadrao: "openrouter/free", visao: false, extra: { "HTTP-Referer": "https://golliasblack.github.io/Prognos/", "X-Title": "Prognos" } },
+  { id: "zai", nome: "Z.ai (GLM)", tipo: "openai", base: "https://api.z.ai/api/paas/v4", chaveEnv: "ZAI_API_KEY", modeloPadrao: "glm-4.7-flash", visao: false },
   { id: "mistral", nome: "Mistral", tipo: "openai", base: "https://api.mistral.ai/v1", chaveEnv: "MISTRAL_API_KEY", modeloPadrao: "mistral-medium-latest", rapidoPadrao: "mistral-small-latest", visao: true },
-  { id: "anthropic", nome: "Anthropic", tipo: "anthropic", base: "https://api.anthropic.com/v1", chaveEnv: "ANTHROPIC_API_KEY", modeloPadrao: "claude-sonnet-5-5", rapidoPadrao: "claude-haiku-5-5", visao: true },
+  { id: "huggingface", nome: "Hugging Face", tipo: "openai", base: "https://router.huggingface.co/v1", chaveEnv: "HF_TOKEN", modeloPadrao: "openai/gpt-oss-120b", visao: false },
+  { id: "cerebras", nome: "Cerebras", tipo: "openai", base: "https://api.cerebras.ai/v1", chaveEnv: "CEREBRAS_API_KEY", modeloPadrao: "gpt-oss-120b", visao: false }, // hoje pede cartão
+  // OVHcloud: funciona sem chave (2 pedidos/min por IP); com OVH_API_KEY o limite sobe. Reserva para nunca ficar sem resposta.
+  { id: "ovh", nome: "OVHcloud", tipo: "openai", base: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1", chaveEnv: "OVH_API_KEY", semChave: true, modeloPadrao: "gpt-oss-120b", visao: false },
+  { id: "anthropic", nome: "Anthropic", tipo: "anthropic", base: "https://api.anthropic.com/v1", chaveEnv: "ANTHROPIC_API_KEY", modeloPadrao: "claude-sonnet-5-5", rapidoPadrao: "claude-haiku-5-5", visao: true }, // paga
 ];
-const ORDEM_PADRAO = "groq,cerebras,openrouter,github,gemini,mistral,anthropic";
+const ORDEM_PADRAO = "groq,gemini,nvidia,cloudflare,github,ollama,openrouter,zai,mistral,huggingface,cerebras,ovh,anthropic";
 
 function provedoresAtivos(): Prov[] {
   const ordem = (env("IA_ORDEM") || ORDEM_PADRAO).split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -32,8 +41,8 @@ function provedoresAtivos(): Prov[] {
   const lista = [...ordem, ...todos.map((p) => p.id).filter((id) => !ordem.includes(id))];
   return lista.map((id) => todos.find((p) => p.id === id)).filter(Boolean).map((p: any) => {
     const up = p.id.toUpperCase();
-    return { ...p, chave: env(p.chaveEnv), modelo: env(`MODELO_${up}`) || p.modeloPadrao, modeloRapido: env(`MODELO_${up}_RAPIDO`) || p.rapidoPadrao, visao: env(`VISAO_${up}`) ? env(`VISAO_${up}`) === "sim" : p.visao };
-  }).filter((p: Prov) => p.chave);
+    return { ...p, base: typeof p.base === "function" ? p.base() : p.base, chave: env(p.chaveEnv) || (p.semChave && env("OVH_DESLIGAR") !== "sim" ? "-" : ""), ok: (p.exige ?? []).every((k: string) => env(k)), modelo: env(`MODELO_${up}`) || p.modeloPadrao, modeloRapido: env(`MODELO_${up}_RAPIDO`) || p.rapidoPadrao, visao: env(`VISAO_${up}`) ? env(`VISAO_${up}`) === "sim" : p.visao };
+  }).filter((p: any) => p.chave && p.ok);
 }
 
 // Pausa temporária de provedor que estourou cota (por instância da função).
@@ -207,7 +216,7 @@ Deno.serve(async (req) => {
         if (Array.isArray(b.tools) && b.tools.length) payload.tools = b.tools;
         r = await fetch(`${p.base}/messages`, { method: "POST", headers: { "x-api-key": p.chave, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(payload) });
       } else {
-        r = await fetch(`${p.base}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${p.chave}`, "Content-Type": "application/json", ...(p.extra ?? {}) }, body: JSON.stringify(paraOpenAI(b, modelo, stream)) });
+        r = await fetch(`${p.base}/chat/completions`, { method: "POST", headers: { ...(p.chave !== "-" ? { Authorization: `Bearer ${p.chave}` } : {}), "Content-Type": "application/json", ...(p.extra ?? {}) }, body: JSON.stringify(paraOpenAI(b, modelo, stream)) });
       }
       if (!r.ok) {
         const t = (await r.text()).slice(0, 300);
