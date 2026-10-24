@@ -24,6 +24,8 @@ O sistema foi feito para o chão de fábrica, onde o histórico está espalhado 
 | **Alarmes e malhas** | Racionalização de alarmes conforme ISA-18.2 e diagnóstico de malhas de controle. |
 | **Revisão de CLP** | Leitura e análise de programas de CLP para achar falhas de lógica e riscos. |
 | **Engenharia reversa** | Da foto ou do croqui da peça para um desenho 2D e 3D editável, com cotas e tolerâncias. |
+| **Engenharia em 3D** | Reconstrói peças, conjuntos e a planta inteira em 3D a partir dos desenhos mecânicos, elétricos, civis, estruturais e de tubulação. Aponta interferências: ajustes de eixo, bucha, rolamento e alojamento e colisões entre disciplinas. Abre STEP, IGES, IFC (BIM), STL e OBJ e lê DXF. |
+| **Simulação de CLP** | Lê o programa de qualquer CLP e roda a lógica em 3D: motores, esteiras, cilindros, válvulas e tanques reagindo às entradas, com temporizadores, contadores e a linha energizada em tempo real. |
 | **Biblioteca técnica** | Busca livros e artigos de acesso aberto e explica o conteúdo de forma didática: conceito, funcionamento, fórmula, exemplo numérico e aplicação na planta, sempre com a fonte. |
 | **Aprendizado com o campo** | Quando a falha real for diferente da prevista, o retorno do mantenedor corrige o modelo daquele componente. |
 

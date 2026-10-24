@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' https://hxzgorearzxtvippjhjg.supabase.co; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' https://hxzgorearzxtvippjhjg.supabase.co; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Prognos · Black and White</title>
@@ -169,6 +169,10 @@ button,input,select,textarea{font:inherit;color:inherit}
 .io.on{background:#7CFFB2;color:#07080A;border-color:#7CFFB2}.io.al{background:#FF5D5D;border-color:#FF5D5D;color:#07080A}
 .simLog{max-height:220px;border-top:1px solid var(--line);padding:6px 10px}.rung{font:11.5px/1.5 var(--m);padding:3px 8px;border-left:3px solid var(--line);margin:2px 0;color:var(--mute)}
 .rung b{color:var(--fg);font-weight:500}.rung.on{border-color:#7CFFB2;color:var(--fg)}.rung.al{border-color:#FF5D5D}
+/* engenharia 3D */
+.e3d{height:460px;background:var(--soft);touch-action:none}
+.e3dctl{padding:8px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px}.e3dctl .lin{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.e3dctl input[type=range]{vertical-align:middle;width:120px}
 /* administração */
 .adm{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);display:grid;place-items:center;padding:16px}
 .admbox{width:min(1180px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--glow);overflow:hidden}
@@ -306,6 +310,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 <script src="lib.js"></script>
 <script src="base.js"></script>
 <script src="clpsim.js"></script>
+<script src="eng3d.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

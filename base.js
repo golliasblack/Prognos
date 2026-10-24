@@ -37,8 +37,8 @@ async function chavesPorTermo(t){const d=await idb();return reqP(d.transaction("
 
 /* ---------- tipos de arquivo */
 const TIPO_EXT={texto:/^(pdf|docx|doc|pptx|ppt|txt|rtf|md|xml|html?|json|log|eml|msg|l5x|l5k|scl|st|awl|stl|exp|iec|prg|udt|ini|cfg)$/,
-  tabela:/^(xlsx|xlsm|xls|ods|csv|tsv)$/,imagem:/^(jpe?g|png|tiff?|bmp|gif|webp|heic)$/,video:/^(mp4|avi|mov|mkv|wmv|m4v|3gp)$/,
-  cad:/^(dwg|dxf|dgn|step|stp|igs|iges|sldprt|sldasm|slddrw|ipt|iam|idw|prt|asm|catpart|catproduct|x_t|sat|stl|3dm|rvt|ifc)$/,zip:/^(zip)$/};
+  tabela:/^(xlsx|xlsm|xls|ods|csv|tsv)$/,dxf:/^dxf$/,imagem:/^(jpe?g|png|tiff?|bmp|gif|webp|heic)$/,video:/^(mp4|avi|mov|mkv|wmv|m4v|3gp)$/,
+  cad:/^(dwg|dgn|step|stp|igs|iges|sldprt|sldasm|slddrw|ipt|iam|idw|prt|asm|catpart|catproduct|x_t|sat|stl|3dm|rvt|ifc)$/,zip:/^(zip)$/};
 const tipoDe=ext=>Object.keys(TIPO_EXT).find(k=>TIPO_EXT[k].test(ext))||"outro";
 const textoBinario=ab=>{const t=new TextDecoder("latin1").decode(ab);return (t.match(/[A-Za-zÀ-ÿ0-9 ,.;:()\/%°ºª\-]{6,}/g)||[]).filter(s=>/[A-Za-zÀ-ÿ]{3}/.test(s)).join(" ")};
 
@@ -56,6 +56,7 @@ async function extrairTexto(file,ext){
   if(tipo==="tabela"){const linhas=[];if(/^(csv|tsv)$/.test(ext))linhas.push(...splitCSV(decodeText(ab)));
     else{await need("xlsx");const wb=XLSX.read(ab,{type:"array",cellDates:true});for(const nm of wb.SheetNames.slice(0,12)){const r=XLSX.utils.sheet_to_json(wb.Sheets[nm],{header:1,raw:true,defval:""});out.texto+=`\n[aba ${nm}]\n`;linhas.push(...r);if(linhas.length>200000)break}}
     out.linhas=linhas;out.texto+=linhas.slice(0,3000).map(r=>r.map(c=>c instanceof Date?iso(c):String(c??"")).join(" | ")).join("\n");return out}
+  if(ext==="dxf"){out.k="desenho";out.texto=dxfResumo(decodeText(ab));return out}
   if(ext==="zip"){await need("zip");const z=await JSZip.loadAsync(ab);out.texto="Conteúdo do ZIP: "+Object.keys(z.files).slice(0,500).join(" ");return out}
   if(/^(doc|ppt|msg)$/.test(ext)){out.texto=textoBinario(ab);return out}
   let t=decodeText(ab);if(/^(html?|xml|eml)$/.test(ext))t=t.replace(/<(script|style)[\s\S]*?<\/\1>/gi," ").replace(/<[^>]+>/g," ");
