@@ -1,0 +1,223 @@
+// Prognos · Black and White — roteador de IAs com troca automática.
+// Fala o formato da Anthropic com o app e traduz para provedores compatíveis com OpenAI.
+// Cada provedor só entra na fila se a chave dele estiver cadastrada em Supabase → Edge Functions → Secrets.
+// Ordem: segredo IA_ORDEM (ex.: "groq,cerebras,openrouter,github,gemini,mistral,anthropic").
+// Modelo de cada provedor: segredo MODELO_<PROVEDOR> (ex.: MODELO_GROQ).
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Expose-Headers": "x-prognos-model, x-prognos-provedor, x-prognos-tentativas",
+};
+const env = (k: string) => Deno.env.get(k) ?? "";
+const json = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+
+type Prov = { id: string; nome: string; tipo: "anthropic" | "openai"; base: string; chave: string; modelo: string; modeloRapido?: string; visao: boolean; extra?: Record<string, string> };
+const PROVEDORES: any[] = [
+  { id: "groq", nome: "Groq", tipo: "openai", base: "https://api.groq.com/openai/v1", chaveEnv: "GROQ_API_KEY", modeloPadrao: "openai/gpt-oss-120b", rapidoPadrao: "llama-3.1-8b-instant", visao: false },
+  { id: "cerebras", nome: "Cerebras", tipo: "openai", base: "https://api.cerebras.ai/v1", chaveEnv: "CEREBRAS_API_KEY", modeloPadrao: "gpt-oss-120b", visao: false },
+  { id: "openrouter", nome: "OpenRouter", tipo: "openai", base: "https://openrouter.ai/api/v1", chaveEnv: "OPENROUTER_API_KEY", modeloPadrao: "openai/gpt-oss-120b:free", visao: false, extra: { "HTTP-Referer": "https://golliasblack.github.io/prognos/", "X-Title": "Prognos" } },
+  { id: "github", nome: "GitHub Models", tipo: "openai", base: "https://models.github.ai/inference", chaveEnv: "GITHUB_MODELS_TOKEN", modeloPadrao: "openai/gpt-4.1", rapidoPadrao: "openai/gpt-4.1-mini", visao: true },
+  { id: "gemini", nome: "Google Gemini", tipo: "openai", base: "https://generativelanguage.googleapis.com/v1beta/openai", chaveEnv: "GEMINI_API_KEY", modeloPadrao: "gemini-2.5-flash", rapidoPadrao: "gemini-2.5-flash-lite", visao: true },
+  { id: "mistral", nome: "Mistral", tipo: "openai", base: "https://api.mistral.ai/v1", chaveEnv: "MISTRAL_API_KEY", modeloPadrao: "mistral-medium-latest", rapidoPadrao: "mistral-small-latest", visao: true },
+  { id: "anthropic", nome: "Anthropic", tipo: "anthropic", base: "https://api.anthropic.com/v1", chaveEnv: "ANTHROPIC_API_KEY", modeloPadrao: "claude-sonnet-5-5", rapidoPadrao: "claude-haiku-5-5", visao: true },
+];
+const ORDEM_PADRAO = "groq,cerebras,openrouter,github,gemini,mistral,anthropic";
+
+function provedoresAtivos(): Prov[] {
+  const ordem = (env("IA_ORDEM") || ORDEM_PADRAO).split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const todos = PROVEDORES as any[];
+  const lista = [...ordem, ...todos.map((p) => p.id).filter((id) => !ordem.includes(id))];
+  return lista.map((id) => todos.find((p) => p.id === id)).filter(Boolean).map((p: any) => {
+    const up = p.id.toUpperCase();
+    return { ...p, chave: env(p.chaveEnv), modelo: env(`MODELO_${up}`) || p.modeloPadrao, modeloRapido: env(`MODELO_${up}_RAPIDO`) || p.rapidoPadrao, visao: env(`VISAO_${up}`) ? env(`VISAO_${up}`) === "sim" : p.visao };
+  }).filter((p: Prov) => p.chave);
+}
+
+// Pausa temporária de provedor que estourou cota (por instância da função).
+const pausa = new Map<string, number>();
+const pausado = (id: string) => (pausa.get(id) ?? 0) > Date.now();
+
+// ---------------- tradução Anthropic -> OpenAI
+function textoSistema(s: unknown): string {
+  if (!s) return "";
+  if (typeof s === "string") return s;
+  if (Array.isArray(s)) return s.map((b: any) => b?.text ?? "").join("\n");
+  return "";
+}
+function limpaSchema(s: any): any {
+  if (s === null || typeof s !== "object" || Array.isArray(s)) return { type: "string" };
+  const o: any = {};
+  for (const [k, v] of Object.entries(s)) {
+    if (k === "cache_control") continue;
+    if (k === "properties" && v && typeof v === "object") o.properties = Object.fromEntries(Object.entries(v as any).map(([n, x]) => [n, limpaSchema(x)]));
+    else if (k === "items") o.items = limpaSchema(v);
+    else if ((k === "anyOf" || k === "oneOf") && Array.isArray(v)) o[k] = v.map(limpaSchema);
+    else o[k] = v;
+  }
+  if (!o.type && !o.anyOf && !o.oneOf && !o.enum) o.type = o.properties ? "object" : o.items ? "array" : "string";
+  if (o.type === "object" && o.properties && Object.keys(o.properties).length === 0) delete o.properties;
+  return o;
+}
+function paraOpenAI(b: any, modelo: string, stream: boolean) {
+  const msgs: any[] = [];
+  const sys = textoSistema(b.system);
+  if (sys) msgs.push({ role: "system", content: sys });
+  for (const m of b.messages ?? []) {
+    const blocos = typeof m.content === "string" ? [{ type: "text", text: m.content }] : (m.content ?? []);
+    if (m.role === "assistant") {
+      const texto = blocos.filter((x: any) => x.type === "text").map((x: any) => x.text).join("");
+      const calls = blocos.filter((x: any) => x.type === "tool_use").map((x: any) => ({ id: x.id, type: "function", function: { name: x.name, arguments: JSON.stringify(x.input ?? {}) } }));
+      const msg: any = { role: "assistant", content: texto || (calls.length ? null : "") };
+      if (calls.length) msg.tool_calls = calls;
+      msgs.push(msg);
+    } else {
+      for (const x of blocos.filter((x: any) => x.type === "tool_result")) {
+        const c = typeof x.content === "string" ? x.content : (x.content ?? []).map((y: any) => y.text ?? "").join("\n");
+        msgs.push({ role: "tool", tool_call_id: x.tool_use_id, content: (x.is_error ? "ERRO: " : "") + c });
+      }
+      const partes = blocos.filter((x: any) => x.type === "text" || x.type === "image");
+      if (partes.length) {
+        const temImg = partes.some((x: any) => x.type === "image");
+        msgs.push({
+          role: "user",
+          content: temImg
+            ? partes.map((x: any) => x.type === "text" ? { type: "text", text: x.text } : { type: "image_url", image_url: { url: `data:${x.source?.media_type ?? "image/jpeg"};base64,${x.source?.data}` } })
+            : partes.map((x: any) => x.text).join("\n\n"),
+        });
+      }
+    }
+  }
+  const out: any = { model: modelo, messages: msgs, max_tokens: Math.min(Math.max(+b.max_tokens || 8000, 256), 16000), stream };
+  if (stream) out.stream_options = { include_usage: true };
+  if (Array.isArray(b.tools) && b.tools.length) out.tools = b.tools.map((t: any) => ({ type: "function", function: { name: t.name, description: t.description ?? "", parameters: limpaSchema(t.input_schema ?? { type: "object" }) } }));
+  return out;
+}
+const PARADA: Record<string, string> = { stop: "end_turn", tool_calls: "tool_use", length: "max_tokens", function_call: "tool_use", content_filter: "refusal" };
+
+function streamAnthropic(corpo: ReadableStream<Uint8Array>, modelo: string): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  return new ReadableStream({
+    async start(ctrl) {
+      const send = (ev: string, data: unknown) => ctrl.enqueue(enc.encode(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`));
+      send("message_start", { type: "message_start", message: { id: "msg_" + crypto.randomUUID().replace(/-/g, ""), type: "message", role: "assistant", model: modelo, content: [], usage: { input_tokens: 0, output_tokens: 0 } } });
+      let idx = -1, txt: number | null = null, fim = "end_turn", uso: any = {};
+      const tools = new Map<number, { i: number; id: string; name: string; args: string; started: boolean }>();
+      const fechaTexto = () => { if (txt !== null) { send("content_block_stop", { type: "content_block_stop", index: txt }); txt = null; } };
+      const iniciaTool = (t: any) => {
+        fechaTexto(); idx++; t.i = idx; t.started = true;
+        send("content_block_start", { type: "content_block_start", index: t.i, content_block: { type: "tool_use", id: t.id, name: t.name, input: {} } });
+        if (t.args) send("content_block_delta", { type: "content_block_delta", index: t.i, delta: { type: "input_json_delta", partial_json: t.args } });
+      };
+      const rd = corpo.getReader(); let buf = "";
+      try {
+        for (;;) {
+          const { done, value } = await rd.read(); if (done) break;
+          buf += dec.decode(value, { stream: true }); let n;
+          while ((n = buf.indexOf("\n")) >= 0) {
+            const linha = buf.slice(0, n).trim(); buf = buf.slice(n + 1);
+            if (!linha.startsWith("data:")) continue;
+            const d = linha.slice(5).trim(); if (!d || d === "[DONE]") continue;
+            let j: any; try { j = JSON.parse(d); } catch { continue; }
+            if (j.error) { send("error", { type: "error", error: { type: "api_error", message: j.error.message ?? String(j.error) } }); continue; }
+            if (j.usage) uso = j.usage;
+            const ch = j.choices?.[0]; if (!ch) continue;
+            const dl = ch.delta ?? {};
+            if (typeof dl.content === "string" && dl.content) {
+              if (txt === null) { idx++; txt = idx; send("content_block_start", { type: "content_block_start", index: txt, content_block: { type: "text", text: "" } }); }
+              send("content_block_delta", { type: "content_block_delta", index: txt, delta: { type: "text_delta", text: dl.content } });
+            }
+            for (const tc of dl.tool_calls ?? []) {
+              const k = tc.index ?? 0;
+              let t = tools.get(k);
+              if (!t) { t = { i: -1, id: tc.id || "call_" + crypto.randomUUID().replace(/-/g, "").slice(0, 20), name: "", args: "", started: false }; tools.set(k, t); }
+              if (tc.id && !t.started) t.id = tc.id;
+              if (tc.function?.name) t.name = tc.function.name;
+              const a = tc.function?.arguments ?? "";
+              if (!t.started) { t.args += a; if (t.name) iniciaTool(t); }
+              else if (a) send("content_block_delta", { type: "content_block_delta", index: t.i, delta: { type: "input_json_delta", partial_json: a } });
+            }
+            if (ch.finish_reason) fim = PARADA[ch.finish_reason] ?? "end_turn";
+          }
+        }
+        for (const t of tools.values()) if (!t.started) iniciaTool(t);
+        if (tools.size) fim = "tool_use";
+        fechaTexto();
+        for (const t of tools.values()) send("content_block_stop", { type: "content_block_stop", index: t.i });
+        send("message_delta", { type: "message_delta", delta: { stop_reason: fim }, usage: { output_tokens: uso.completion_tokens ?? 0, input_tokens: uso.prompt_tokens ?? 0 } });
+        send("message_stop", { type: "message_stop" });
+      } catch (e) {
+        send("error", { type: "error", error: { type: "api_error", message: String(e) } });
+      }
+      ctrl.close();
+    },
+  });
+}
+function respostaAnthropic(j: any, modelo: string) {
+  const m = j.choices?.[0]?.message ?? {};
+  const content: any[] = [];
+  if (m.content) content.push({ type: "text", text: m.content });
+  for (const tc of m.tool_calls ?? []) {
+    let input = {}; try { input = JSON.parse(tc.function?.arguments || "{}"); } catch { /* */ }
+    content.push({ type: "tool_use", id: tc.id || "call_" + crypto.randomUUID().slice(0, 8), name: tc.function?.name, input });
+  }
+  return { id: j.id, type: "message", role: "assistant", model: modelo, content, stop_reason: PARADA[j.choices?.[0]?.finish_reason] ?? "end_turn", usage: { input_tokens: j.usage?.prompt_tokens ?? 0, output_tokens: j.usage?.completion_tokens ?? 0 } };
+}
+const temImagem = (b: any) => (b.messages ?? []).some((m: any) => Array.isArray(m.content) && m.content.some((x: any) => x.type === "image"));
+
+// ---------------- servidor
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json(405, { code: "invalid_request", message: "Use POST" });
+  const auth = req.headers.get("Authorization") ?? "";
+  const m = await fetch(`${env("SUPABASE_URL")}/rest/v1/rpc/sou_membro`, { method: "POST", headers: { apikey: env("SUPABASE_ANON_KEY"), Authorization: auth, "Content-Type": "application/json" }, body: "{}" });
+  if (!m.ok) return json(401, { code: "session_expired", message: "Sessão inválida" });
+  if ((await m.json()) !== true) return json(403, { code: "not_granted", message: "Usuário não autorizado no Prognos" });
+
+  let b: any;
+  try { b = await req.json(); } catch { return json(400, { code: "invalid_request", message: "JSON inválido" }); }
+  const ativos = provedoresAtivos();
+  if (b.acao === "status") return json(200, { provedores: ativos.map((p) => ({ id: p.id, nome: p.nome, modelo: p.modelo, visao: p.visao, pausado: pausado(p.id) })) });
+  if (!ativos.length) return json(503, { code: "sampling_disabled", message: "Nenhuma chave de IA cadastrada. Cadastre pelo menos uma em Supabase → Edge Functions → Secrets (ex.: GROQ_API_KEY)." });
+  if (!Array.isArray(b.messages) || !b.messages.length) return json(400, { code: "invalid_request", message: "messages vazio" });
+
+  const stream = b.stream !== false, img = temImagem(b), rapido = b.tier === "quick";
+  let fila = ativos.filter((p) => !pausado(p.id));
+  if (!fila.length) fila = ativos;
+  if (img) { const comVisao = fila.filter((p) => p.visao); if (comVisao.length) fila = comVisao; }
+  if (b.provedor) { const p = ativos.find((x) => x.id === b.provedor); if (p) fila = [p, ...fila.filter((x) => x !== p)]; }
+
+  const erros: string[] = [];
+  for (const p of fila) {
+    const modelo = p.tipo === "anthropic"
+      ? ({ quick: env("MODELO_ANTHROPIC_RAPIDO") || "claude-haiku-5-5", complex: env("MODELO_ANTHROPIC_PROFUNDO") || "claude-opus-5-5" } as any)[b.tier] ?? p.modelo
+      : (rapido && p.modeloRapido) ? p.modeloRapido : p.modelo;
+    try {
+      let r: Response;
+      if (p.tipo === "anthropic") {
+        const payload: any = { model: modelo, max_tokens: Math.min(Math.max(+b.max_tokens || 8000, 256), 32000), messages: b.messages, stream };
+        if (b.system) payload.system = b.system;
+        if (Array.isArray(b.tools) && b.tools.length) payload.tools = b.tools;
+        r = await fetch(`${p.base}/messages`, { method: "POST", headers: { "x-api-key": p.chave, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(payload) });
+      } else {
+        r = await fetch(`${p.base}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${p.chave}`, "Content-Type": "application/json", ...(p.extra ?? {}) }, body: JSON.stringify(paraOpenAI(b, modelo, stream)) });
+      }
+      if (!r.ok) {
+        const t = (await r.text()).slice(0, 300);
+        erros.push(`${p.nome} ${r.status}: ${t}`);
+        if (r.status === 429 || r.status === 402) pausa.set(p.id, Date.now() + (Number(r.headers.get("retry-after")) * 1000 || 60_000));
+        else if (r.status === 401 || r.status === 403) pausa.set(p.id, Date.now() + 10 * 60_000);
+        continue; // próximo provedor
+      }
+      const h = { ...CORS, "x-prognos-model": modelo, "x-prognos-provedor": p.nome, "x-prognos-tentativas": String(erros.length + 1) };
+      if (p.tipo === "anthropic") return new Response(r.body, { status: 200, headers: { ...h, "Content-Type": stream ? "text/event-stream" : "application/json" } });
+      if (stream) return new Response(streamAnthropic(r.body!, modelo), { status: 200, headers: { ...h, "Content-Type": "text/event-stream" } });
+      return new Response(JSON.stringify(respostaAnthropic(await r.json(), modelo)), { status: 200, headers: { ...h, "Content-Type": "application/json" } });
+    } catch (e) {
+      erros.push(`${p.nome}: ${String(e).slice(0, 200)}`);
+    }
+  }
+  return json(429, { code: "rate_limited", message: "Todas as IAs cadastradas falharam ou estão sem cota agora. " + erros.join(" | ").slice(0, 900) });
+});

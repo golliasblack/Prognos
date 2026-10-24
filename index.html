@@ -84,6 +84,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .step.run{animation:blink 1.4s ease-in-out infinite}
 @keyframes blink{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){.step.run{animation:none}}
+.prov{font:11px var(--m);color:var(--mute);margin-top:4px}
+.src a{color:var(--fg);text-underline-offset:2px}
 .err{border:1px solid var(--hard);border-radius:8px;padding:10px 12px;font-size:14px;margin:8px 0}
 /* cartões */
 .card{border:1px solid var(--line);border-radius:12px;margin:12px 0;overflow:hidden;background:var(--bg)}
@@ -176,6 +178,7 @@ button,input,select,textarea{font:inherit;color:inherit}
     <nav class="convs" id="convs"></nav>
     <div class="sidefoot">
       <div class="kb" id="kbStat">Base da planta: conectando…</div>
+      <div class="kb" id="iaStat">IAs: verificando…</div>
       <div class="who"><span id="whoMail"></span><button class="link" id="logout">Sair</button></div>
       <div class="who"><button class="link" id="themeBtn">Tema</button><span class="mono" style="font-size:11px">Technology Ahead of Time</span></div>
     </div>
