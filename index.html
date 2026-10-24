@@ -161,6 +161,14 @@ button,input,select,textarea{font:inherit;color:inherit}
 .onb .num{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:12px 0}
 .onb .num b{display:block;font:600 20px var(--f);font-variant-numeric:tabular-nums}
 .onb .num small{font:11px var(--m);color:var(--mute);text-transform:uppercase;letter-spacing:.06em}
+/* simulação de CLP */
+.sim3d{height:360px;background:var(--soft);touch-action:none}
+.simg{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;background:var(--line);border-top:1px solid var(--line)}
+.simg>div{background:var(--bg);padding:8px 12px}.simg small{display:block;font:11px var(--m);color:var(--mute);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.io{display:inline-flex;align-items:center;gap:6px;margin:3px 6px 3px 0;font:12px var(--m);border:1px solid var(--line);border-radius:6px;padding:3px 8px;cursor:pointer;user-select:none;background:var(--soft)}
+.io.on{background:#7CFFB2;color:#07080A;border-color:#7CFFB2}.io.al{background:#FF5D5D;border-color:#FF5D5D;color:#07080A}
+.simLog{max-height:220px;border-top:1px solid var(--line);padding:6px 10px}.rung{font:11.5px/1.5 var(--m);padding:3px 8px;border-left:3px solid var(--line);margin:2px 0;color:var(--mute)}
+.rung b{color:var(--fg);font-weight:500}.rung.on{border-color:#7CFFB2;color:var(--fg)}.rung.al{border-color:#FF5D5D}
 /* administração */
 .adm{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);display:grid;place-items:center;padding:16px}
 .admbox{width:min(1180px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--glow);overflow:hidden}
@@ -297,6 +305,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 
 <script src="lib.js"></script>
 <script src="base.js"></script>
+<script src="clpsim.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
