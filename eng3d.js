@@ -14,7 +14,7 @@ const numE=v=>{const n=+String(v??"").replace(",",".");return isFinite(n)?n:0};
 function solMatriz(s){const T=THREE,m=new T.Matrix4(),e=s.eixo||"z";const r=(s.rot||[0,0,0]).map(a=>numE(a)*Math.PI/180);
   const base=new T.Matrix4();if(e==="x")base.makeRotationY(Math.PI/2);else if(e==="y")base.makeRotationX(-Math.PI/2);
   const R=new T.Matrix4().makeRotationFromEuler(new T.Euler(r[0]||0,r[1]||0,r[2]||0,"XYZ"));const p=(s.pos||[0,0,0]).map(numE);
-  m.makeTranslation(p[0]||0,p[1]||0,p[2]||0).multiply(R).multiply(base);return m}
+  m.makeTranslation(p[0]||0,p[1]||0,p[2]||0).multiply(R).multiply(base);if(s.G)m.premultiply(new T.Matrix4().fromArray(s.G));return m}
 function solGeom(s){const T=THREE,f=s.forma;let g;
   if(f==="caixa"){g=new T.BoxGeometry(numE(s.w)||1,numE(s.p)||1,numE(s.h)||1);g.translate(0,0,(numE(s.h)||1)/2)}
   else if(f==="cilindro"){const r=numE(s.d)/2||.5,h=numE(s.h)||1;g=new T.CylinderGeometry(r,r,h,48);g.rotateX(Math.PI/2);g.translate(0,0,h/2)}
@@ -49,10 +49,11 @@ function ajustesCoaxiais(pecas,tol){const out=[],lista=[];
   const vistos=new Set();return out.filter(x=>{const k=[x.a,x.b,x.diam_externo,x.diam_furo].join("|");if(vistos.has(k))return false;vistos.add(k);return true})}
 
 /* ---------- colisões gerais por amostragem do volume comum */
-function colisoes(pecas,{amostras=6000}={}){const out=[];const caixas=pecas.map(pc=>{const b=new THREE.Box3();pc._geos.forEach(g=>{g.computeBoundingBox();b.union(g.boundingBox)});return b});
-  for(let i=0;i<pecas.length;i++)for(let j=i+1;j<pecas.length;j++){const I=caixas[i].clone().intersect(caixas[j]);if(I.isEmpty())continue;const sz=I.getSize(new THREE.Vector3());if(sz.x<=0||sz.y<=0||sz.z<=0)continue;
+function colisoes(pecas,{amostras=6000,off=null,so=null}={}){const out=[];const O=id=>off?.get(id);const dentroDe=(pc,p)=>{const o=O(pc.id);return pecaContem(pc,o?p.clone().sub(o):p)};
+  const caixas=pecas.map(pc=>{const b=new THREE.Box3();pc._geos.forEach(g=>{g.computeBoundingBox();b.union(g.boundingBox)});const o=O(pc.id);if(o)b.translate(o);return b});
+  for(let i=0;i<pecas.length;i++)for(let j=i+1;j<pecas.length;j++){if(so&&!so.has(pecas[i].id)&&!so.has(pecas[j].id))continue;if(so&&pecas[i].equipamento&&pecas[i].equipamento===pecas[j].equipamento&&so.has(pecas[i].id)&&so.has(pecas[j].id))continue;const I=caixas[i].clone().intersect(caixas[j]);if(I.isEmpty())continue;const sz=I.getSize(new THREE.Vector3());if(sz.x<=0||sz.y<=0||sz.z<=0)continue;
     const n=Math.round(Math.cbrt(amostras)),pts=[];let dentro=0;const c=new THREE.Vector3();
-    for(let a=0;a<n;a++)for(let b=0;b<n;b++)for(let k=0;k<n;k++){const p=new THREE.Vector3(I.min.x+sz.x*(a+.5)/n,I.min.y+sz.y*(b+.5)/n,I.min.z+sz.z*(k+.5)/n);if(pecaContem(pecas[i],p)&&pecaContem(pecas[j],p)){dentro++;c.add(p);if(pts.length<400)pts.push(p)}}
+    for(let a=0;a<n;a++)for(let b=0;b<n;b++)for(let k=0;k<n;k++){const p=new THREE.Vector3(I.min.x+sz.x*(a+.5)/n,I.min.y+sz.y*(b+.5)/n,I.min.z+sz.z*(k+.5)/n);if(dentroDe(pecas[i],p)&&dentroDe(pecas[j],p)){dentro++;c.add(p);if(pts.length<400)pts.push(p)}}
     if(dentro){const vol=sz.x*sz.y*sz.z*dentro/(n*n*n);out.push({a:pecas[i].id,b:pecas[j].id,volume:vol,centro:c.multiplyScalar(1/dentro),pontos:pts})}}return out}
 
 /* ---------- cena */
@@ -62,11 +63,11 @@ async function eng3dCena(el,{pecas,escala=1,interf=[],marcadores=[]}){await load
   const sc=new T.Scene(),cam=new T.PerspectiveCamera(38,W/H,.001,1e5);cam.up.set(0,0,1);sc.add(new T.HemisphereLight(0xffffff,0x404040,1));const dl=new T.DirectionalLight(0xffffff,.75);dl.position.set(3,-5,8);sc.add(dl);
   const corte=new T.Plane(new T.Vector3(-1,0,0),1e9),raiz=new T.Group();raiz.scale.setScalar(escala);sc.add(raiz);const objs=new Map();
   for(const pc of pecas){const g=new T.Group();const cor=new T.Color(pc.cor||DISC_COR[pc.disciplina]||DISC_COR.outro);
-    const mat=new T.MeshStandardMaterial({color:cor,metalness:pc.disciplina==="civil"?.05:.45,roughness:pc.disciplina==="civil"?.85:.45,transparent:true,opacity:pc.origem==="estimado"?.75:1,clippingPlanes:[corte],clipShadows:true,side:T.DoubleSide});
+    const mat=new T.MeshStandardMaterial({color:cor,metalness:pc.disciplina==="civil"?.05:.45,roughness:pc.disciplina==="civil"?.85:.45,transparent:true,opacity:pc.opacidade??(pc.origem==="estimado"?.75:1),clippingPlanes:[corte],clipShadows:true,side:T.DoubleSide});
     const linha=new T.LineBasicMaterial({color:0x0b0b0b,transparent:true,opacity:.35,clippingPlanes:[corte]});
     for(const geo of pc._geos){g.add(new T.Mesh(geo,mat));if(geo.attributes.position.count<60000)g.add(new T.LineSegments(new T.EdgesGeometry(geo,30),linha))}
     for(const geo of pc._furos||[]){g.add(new T.Mesh(geo,new T.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.35,depthWrite:false,clippingPlanes:[corte]})))}
-    g.userData.peca=pc;raiz.add(g);objs.set(pc.id,{g,mat})}
+    g.userData.peca=pc;raiz.add(g);objs.set(pc.id,{g,mat,op:mat.opacity})}
   const mk=new T.Group();raiz.add(mk);
   for(const c of interf){const geo=new T.BufferGeometry().setFromPoints(c.pontos||[]);mk.add(new T.Points(geo,new T.PointsMaterial({color:0xff3b3b,size:4,sizeAttenuation:false,depthTest:false})))}
   for(const m of marcadores){const s=new T.Mesh(new T.SphereGeometry(1,16,12),new T.MeshBasicMaterial({color:m.cor||0xff3b3b,transparent:true,opacity:.55,depthTest:false}));s.position.copy(m.p);s.scale.setScalar(m.r||1);mk.add(s)}
@@ -80,22 +81,23 @@ async function eng3dCena(el,{pecas,escala=1,interf=[],marcadores=[]}){await load
   const desenha=()=>ren.render(sc,cam);desenha();
   return {desenha,box,
     visivel:(disc,on)=>{for(const [,o] of objs)if(o.g.userData.peca.disciplina===disc)o.g.visible=on;desenha()},
-    opacidade:v=>{for(const [,o] of objs){o.mat.opacity=v;o.mat.depthWrite=v>.95}desenha()},
+    opacidade:v=>{for(const [,o] of objs){o.mat.opacity=Math.min(o.op,v);o.mat.depthWrite=o.mat.opacity>.95}desenha()},
+    mover:(id,v)=>{const o=objs.get(id);if(o)o.g.position.copy(v)},marcadores:(lista)=>{mk.clear();for(const m of lista){const s=new T.Mesh(new T.SphereGeometry(1,16,12),new T.MeshBasicMaterial({color:m.cor||0xff3b3b,transparent:true,opacity:.55,depthTest:false}));s.position.copy(m.p);s.scale.setScalar(m.r||1);mk.add(s)}desenha()},
     corte:(eixo,frac)=>{if(frac>=1){corte.constant=1e9;desenha();return}const n=eixo==="x"?new T.Vector3(-1,0,0):eixo==="y"?new T.Vector3(0,-1,0):new T.Vector3(0,0,-1);const lo=box.min[eixo],hi=box.max[eixo];corte.normal.copy(n);corte.constant=(lo+(hi-lo)*frac);desenha()},
     foco:id=>{const o=objs.get(id);if(!o)return;const b=new T.Box3().setFromObject(o.g);alvo.copy(b.getCenter(new T.Vector3()));dist=Math.max(b.getSize(new T.Vector3()).length()*1.6,R*.05);poe();desenha()},
     destaca:ids=>{for(const [id,o] of objs){o.mat.emissive?.set(ids.includes(id)?0x661111:0x000000)}desenha()},
     obj:()=>{let s="# Prognos · Black and White\n",off=1;for(const [id,o] of objs){s+=`o ${String(id).replace(/\s+/g,"_")}\n`;o.g.traverse(m=>{if(!m.isMesh)return;const g=m.geometry.index?m.geometry.toNonIndexed():m.geometry,p=g.attributes.position;for(let i=0;i<p.count;i++)s+=`v ${(p.getX(i)*escala).toFixed(5)} ${(p.getY(i)*escala).toFixed(5)} ${(p.getZ(i)*escala).toFixed(5)}\n`;for(let i=0;i<p.count;i+=3)s+=`f ${off+i} ${off+i+1} ${off+i+2}\n`;off+=p.count})}return s}}}
 
 /* ---------- cartão do modelo */
-function eng3dPrepara(M){const pecas=(M.pecas||[]).map((p,i)=>({id:p.id||p.nome||"peca"+(i+1),nome:p.nome||p.id||"peça "+(i+1),disciplina:DISC_COR[p.disciplina]?p.disciplina:"outro",cor:p.cor,origem:p.origem||"estimado",fonte:p.fonte,
+function eng3dPrepara(M){const X=typeof expandirEquipamentos==="function"?expandirEquipamentos(M):{pecas:M.pecas||[],resumo:[]};M._resumo=X.resumo;const pecas=X.pecas.map((p,i)=>({id:p.id||p.nome||"peca"+(i+1),nome:p.nome||p.id||"peça "+(i+1),disciplina:DISC_COR[p.disciplina]?p.disciplina:"outro",cor:p.cor,origem:p.origem||"estimado",fonte:p.fonte,opacidade:p.opacidade,equipamento:p.equipamento,
   solidos:(p.solidos||[]).filter(s=>s&&s.forma),vazios:(p.vazios||[]).filter(s=>s&&s.forma)})).filter(p=>p.solidos.length);
   for(const pc of pecas){pc._geos=pc.solidos.map(s=>{s._inv=solMatriz(s).invert();return solGeom(s)});pc._furos=pc.vazios.map(s=>{s._inv=solMatriz(s).invert();return solGeom(s)})}return pecas}
 function eng3dAnalisa(M,pecas){const un=M.unidade==="m"?"m":"mm",tol=un==="m"?1e-5:.005;
   const aj=ajustesCoaxiais(pecas,tol),col=colisoes(pecas);const previstos=new Set((M.ajustes_previstos||[]).map(x=>[x[0],x[1]].sort().join("|")));
   const coax=new Set(aj.filter(a=>a.interferencia>0).map(a=>[a.a,a.b].sort().join("|")));
-  const conflitos=col.filter(c=>!coax.has([c.a,c.b].sort().join("|"))).map(c=>({...c,previsto:previstos.has([c.a,c.b].sort().join("|"))}));
+  const eqDe=new Map(pecas.map(p=>[p.id,p.equipamento]));const conflitos=col.filter(c=>!coax.has([c.a,c.b].sort().join("|"))&&!(eqDe.get(c.a)&&eqDe.get(c.a)===eqDe.get(c.b))).map(c=>({...c,previsto:previstos.has([c.a,c.b].sort().join("|"))}));
   return {un,ajustes:aj.map(a=>({...a,previsto:previstos.has([a.a,a.b].sort().join("|"))})),conflitos}}
-function eng3dCard(d){const M=JSON.parse(JSON.stringify(d.modelo||{}));const el=card(`Modelo 3D · ${M.nome||"conjunto"}`,`<div class="e3d"></div><div class="e3dctl"></div><div class="simg"><div><small>Interferências e ajustes</small><div class="e3dint"></div></div><div><small>Peças</small><div class="e3dpc scroll" style="max-height:220px"></div></div></div><p class="note e3dnota"></p>`,
+function eng3dCard(d){const M=JSON.parse(JSON.stringify(d.modelo||{}));const el=card(`Modelo 3D · ${M.nome||"conjunto"}`,`<div class="e3d"></div><div class="e3dctl"></div><div class="e3dseq"></div><div class="simg"><div><small>Interferências e ajustes</small><div class="e3dint"></div></div><div><small>Peças</small><div class="e3dpc scroll" style="max-height:220px"></div></div></div><p class="note e3dnota"></p>`,
   `<button class="btn" data-e="obj">Exportar OBJ</button><button class="btn" data-e="json">Modelo (JSON)</button>`);
   setTimeout(async()=>{try{await loadScript("vendor/three.min.js")}catch(e){el.querySelector(".e3d").innerHTML=`<p class="note">Não consegui carregar o 3D.</p>`;return}
     const pecas=eng3dPrepara(M),A=eng3dAnalisa(M,pecas),un=A.un,fator=un==="mm"?.001:1;
@@ -106,13 +108,28 @@ function eng3dCard(d){const M=JSON.parse(JSON.stringify(d.modelo||{}));const el=
     el.querySelector(".e3dctl").innerHTML=`<div class="lin">${discs.map(k=>`<label class="io on" style="background:${DISC_COR[k]};border-color:${DISC_COR[k]};color:#07080A"><input type="checkbox" checked data-d="${k}" style="margin:0"> ${DISC_NOME[k]}</label>`).join("")}</div>
       <div class="lin"><label class="kb">Transparência <input type="range" min="15" max="100" value="100" data-o></label><label class="kb">Corte <select data-ce><option value="x">X</option><option value="y">Y</option><option value="z">Z</option></select> <input type="range" min="0" max="100" value="100" data-c></label></div>`;
     el.querySelector(".e3dctl").oninput=e=>{const t=e.target;if(t.dataset.d)V.visivel(t.dataset.d,t.checked);if(t.dataset.o!=null)V.opacidade(+t.value/100);if(t.dataset.c!=null||t.dataset.ce!=null)V.corte(el.querySelector("[data-ce]").value,+el.querySelector("[data-c]").value/100)};
+    const eqDe=new Map(pecas.map(p=>[p.id,p.equipamento]));A.ajustes=A.ajustes.filter(a=>a.interferencia||a.folga||!(eqDe.get(a.a)&&eqDe.get(a.a)===eqDe.get(a.b)));
     const linhas=[...A.ajustes.map(a=>`<div class="rung ${a.interferencia&&!a.previsto?"al":a.interferencia?"":"on"}" data-f="${esc_(a.a)}|${esc_(a.b)}"><b>${esc(nome(a.a))} em ${esc(nome(a.b))}</b> Ø${a.diam_externo} em furo Ø${a.diam_furo} ${un}: ${a.interferencia?`interferência diametral de ${a.interferencia} ${un}${a.previsto?" (ajuste prensado previsto)":" — não previsto"}`:a.folga?`folga diametral de ${a.folga} ${un}`:"ajuste exato"} · contato em ${a.comprimento} ${un}${a.desalinhamento?` · desalinhamento ${a.desalinhamento} ${un}`:""}</div>`),
       ...A.conflitos.map(c=>`<div class="rung ${c.previsto?"":"al"}" data-f="${esc_(c.a)}|${esc_(c.b)}"><b>${esc(nome(c.a))} × ${esc(nome(c.b))}</b> ${c.previsto?"sobreposição prevista":"colisão"} · volume comum ≈ ${fmtV(c.volume)} · em (${[c.centro.x,c.centro.y,c.centro.z].map(v=>(Math.abs(v)<1e-9?0:+v).toFixed(un==="mm"?0:2).replace(/^-0(\.0+)?$/,"0")).join(", ")}) ${un}</div>`)];
     el.querySelector(".e3dint").innerHTML=linhas.join("")||`<span class="kb">Nenhuma interferência encontrada.</span>`;
     el.querySelector(".e3dint").onclick=e=>{const r=e.target.closest("[data-f]");if(!r)return;const [a,b]=r.dataset.f.split("|");V.destaca([a,b]);V.foco(a)};
     el.querySelector(".e3dpc").innerHTML=pecas.map(p=>`<div class="rung" data-p="${esc_(p.id)}"><b style="color:${DISC_COR[p.disciplina]}">■</b> <b>${esc(p.nome)}</b> · ${DISC_NOME[p.disciplina]} · ${p.origem==="estimado"?"<i>medidas estimadas</i>":p.origem}${p.fonte?" · "+esc(p.fonte):""}</div>`).join("");
     el.querySelector(".e3dpc").onclick=e=>{const r=e.target.closest("[data-p]");if(r){V.destaca([r.dataset.p]);V.foco(r.dataset.p)}};
-    el.querySelector(".e3dnota").textContent=`${pecas.length} peça(s) em ${un}. Arraste para girar, Shift ou botão direito para mover, roda para zoom. Peças semitransparentes têm medidas estimadas. ${M.observacoes||""}`;
+    const sups=(M._resumo||[]).flatMap(r=>(r.suposicoes||[]).map(x=>`${r.id}: ${x}`));
+    el.querySelector(".e3dnota").textContent=`${pecas.length} peça(s) em ${un}. Arraste para girar, Shift ou botão direito para mover, roda para zoom. Peças semitransparentes têm medidas estimadas. ${M.observacoes||""}${sups.length?" Suposições: "+sups.join("; ")+".":""}`;
+    /* sequência de montagem, desmontagem ou substituição, com verificação de colisão em cada passo */
+    const SEQ=(M.sequencia||[]).filter(p=>p&&p.movimentos);if(SEQ.length){const ids=new Map(pecas.map(p=>[p.id,p]));const alvo=nm=>{const k=String(nm);if(ids.has(k))return [k];const pref=pecas.filter(p=>p.id.startsWith(k+"_")||p.equipamento===k).map(p=>p.id);return pref};
+      const offs=[new Map()];SEQ.forEach((ps,k)=>{const m=new Map([...offs[k]].map(([a,v])=>[a,v.clone()]));for(const mv of ps.movimentos)for(const id of alvo(mv.peca)){const d=new THREE.Vector3(...(mv.desloca||[0,0,0]).map(numE));m.set(id,(m.get(id)||new THREE.Vector3()).add(d))}offs.push(m)});
+      const box=el.querySelector(".e3dseq");let atual=0,anim=null;const res=new Map();
+      const verifica=k=>{if(res.has(k))return res.get(k);const mov=new Set([...offs[k].keys()]);const c=k?colisoes(pecas,{amostras:2500,off:offs[k],so:mov}):[];res.set(k,c);return c};
+      const pinta=(k,frac=1)=>{const a=offs[Math.max(0,k-1)],b=offs[k];for(const pc of pecas){const va=a.get(pc.id)||new THREE.Vector3(),vb=b.get(pc.id)||new THREE.Vector3();V.mover(pc.id,va.clone().lerp(vb,frac))}V.desenha()};
+      const mostra=k=>{atual=k;const c=verifica(k);V.marcadores(c.map(x=>({p:x.centro,r:Math.cbrt(x.volume)*.6+(un==="mm"?20:.05),cor:0xff3b3b})));
+        box.querySelector(".sqt").innerHTML=k?`<b>Passo ${k} de ${SEQ.length} · ${esc(SEQ[k-1].titulo||"")}</b> ${esc(SEQ[k-1].nota||"")}${c.length?`<div class="rung al">Colisão neste passo: ${c.map(x=>esc(nome(x.a))+" × "+esc(nome(x.b))).join("; ")}</div>`:`<div class="rung on">Caminho livre neste passo.</div>`}`:`<b>Posição montada</b> · ${SEQ.length} passo(s) na sequência`};
+      box.innerHTML=`<div class="lin"><small>Sequência</small><button class="btn" data-q="-1">◀</button><button class="btn fill" data-q="play">Animar</button><button class="btn" data-q="1">▶</button><input type="range" min="0" max="${SEQ.length}" value="0" data-q="r" style="flex:1"></div><div class="sqt kb"></div>`;
+      const vai=k=>{k=Math.max(0,Math.min(SEQ.length,k));box.querySelector('[data-q="r"]').value=k;const ini=performance.now(),de=atual;if(k===de){mostra(k);return}cancelAnimationFrame(anim);
+        const passo=t=>{const f=Math.min(1,(t-ini)/900);if(k>de)pinta(k,f);else pinta(de,1-f);if(f<1)anim=requestAnimationFrame(passo);else{pinta(k,1);mostra(k)}};anim=requestAnimationFrame(passo)};
+      box.onclick=async e=>{const b=e.target.closest("button[data-q]");if(!b)return;if(b.dataset.q==="play"){for(let k=atual+1;k<=SEQ.length;k++){vai(k);await new Promise(r=>setTimeout(r,1500))}}else vai(atual+ +b.dataset.q)};
+      box.querySelector('[data-q="r"]').oninput=e=>{const k=+e.target.value;pinta(k,1);mostra(k)};mostra(0)}
     el.querySelector(".acts").onclick=e=>{const b=e.target.closest("[data-e]");if(!b)return;const nm=(M.nome||"modelo").replace(/[^\w-]+/g,"_");
       if(b.dataset.e==="obj")baixar(nm+".obj",V.obj(),"text/plain");else baixar(nm+".json",JSON.stringify(d.modelo,null,1),"application/json")}},30);
   return el}
