@@ -173,6 +173,12 @@ button,input,select,textarea{font:inherit;color:inherit}
 .e3d{height:460px;background:var(--soft);touch-action:none}
 .e3dctl{padding:8px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px}.e3dctl .lin{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .e3dctl input[type=range]{vertical-align:middle;width:120px}
+/* operação assistida */
+.assist{border:1px solid var(--line);border-radius:16px;background:var(--soft);margin-bottom:8px;overflow:hidden;box-shadow:var(--glow)}
+.asv{position:relative;background:#000;max-height:46vh;display:grid;place-items:center}.asv video{width:100%;max-height:46vh;object-fit:contain;display:block}
+.astag{position:absolute;left:10px;top:8px;font:11px var(--m);letter-spacing:.14em;text-transform:uppercase;color:#E8EAED;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px}
+.asctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px}
+@media (max-width:860px){.asv,.asv video{max-height:38vh}}
 /* administração */
 .adm{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);display:grid;place-items:center;padding:16px}
 .admbox{width:min(1180px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--glow);overflow:hidden}
@@ -184,6 +190,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .admbar{display:flex;gap:12px;align-items:center;padding:12px 20px}.admbar input{flex:1;border:1px solid var(--line);border-radius:9px;padding:9px 12px;background:var(--soft)}
 .admt{max-height:none;flex:1;padding:0 8px 12px}.admt td .btn{margin:2px 4px 2px 0}
 .tag{display:inline-block;font:11px var(--m);border:1px solid var(--line);border-radius:5px;padding:1px 6px;margin:1px 4px 1px 0}.tag.bl{background:var(--hard);color:var(--inv);border-color:var(--hard)}
+.admnovo{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 20px;border-bottom:1px solid var(--line)}.admnovo input,.admnovo select{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:var(--soft);min-width:150px}
 /* composer */
 .comp{padding:10px 0 calc(14px + env(safe-area-inset-bottom,0px))}
 .box{border:1px solid var(--line);border-radius:16px;background:var(--soft);padding:8px 8px 8px 12px;box-shadow:var(--glow);transition:border-color .2s}
@@ -266,6 +273,7 @@ button,input,select,textarea{font:inherit;color:inherit}
         <div class="bar">
           <button class="ico" id="clip" title="Anexar arquivos" aria-label="Anexar arquivos"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5 12.5 20a5.5 5.5 0 0 1-7.8-7.8l9-9a3.7 3.7 0 0 1 5.2 5.2l-9 9a1.8 1.8 0 0 1-2.6-2.6l8.3-8.3"/></svg></button>
           <label class="ico" for="cam" title="Câmera" aria-label="Fotografar ou filmar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h3l2-2h6l2 2h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></svg></label>
+          <button class="ico" id="assist" title="Operação assistida: câmera ou tela ao vivo" aria-label="Operação assistida"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2"/></svg></button>
           <input type="file" id="files" multiple hidden>
           <input type="file" id="cam" accept="image/*,video/*" capture="environment" hidden>
           <button class="ico send" id="send" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
@@ -280,6 +288,10 @@ button,input,select,textarea{font:inherit;color:inherit}
   <div class="admbox">
     <header><div><p class="st">Black and White · Prognos</p><h2 id="admTit">Administração</h2></div><button class="link" id="admFechar">Fechar</button></header>
     <div class="admk" id="admK"></div>
+    <form class="admnovo" id="admNovo"><b>Cadastrar usuário</b>
+      <input id="anEmail" type="email" placeholder="E-mail" required><input id="anNome" placeholder="Nome">
+      <select id="anUni"></select><input id="anEmp" placeholder="Empresa" hidden><input id="anUniNova" placeholder="Unidade" hidden>
+      <label class="kb" id="anAdmL"><input type="checkbox" id="anAdm"> administrador da unidade</label><button class="btn fill">Enviar convite</button></form>
     <div class="admbar"><input id="admBusca" placeholder="Buscar por e-mail, nome, empresa ou unidade"><span class="kb" id="admMsg"></span></div>
     <div class="scroll admt"><table class="tbl"><thead><tr><th>Usuário</th><th>Empresa · unidade</th><th>Entrou</th><th>Último acesso</th><th>IA hoje / 30 d</th><th>Situação</th><th></th></tr></thead><tbody id="admRows"></tbody></table></div>
   </div>
@@ -312,5 +324,6 @@ button,input,select,textarea{font:inherit;color:inherit}
 <script src="clpsim.js"></script>
 <script src="eng3d.js"></script>
 <script src="app.js"></script>
+<script src="assistida.js"></script>
 </body>
 </html>

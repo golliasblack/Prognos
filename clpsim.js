@@ -214,9 +214,8 @@ function montarPrograma(fontes){const E=novoEstado(),unidades=[],avisos=[];
           else avisos.push(`Rotina ${rn} em ${ty}: precisa de tradução pela IA`)})}
       else if(d==="ladder"){t.split(/;\s*(?:\n|$)/).map(x=>x.trim()).filter(x=>/\(/.test(x)).forEach((tx,i)=>{const seq=rungParse(tx);rwDeclaraOperandos(seq,E);unidades.push({tipo:"ladder",nome:`rung ${i}`,texto:tx,seq})})}
       else if(d==="plcopen"){const doc=new DOMParser().parseFromString(t,"application/xml");
-        [...doc.getElementsByTagName("variable")].forEach(v=>{const ty=v.getElementsByTagName("type")[0]?.firstElementChild;const tn=ty?.localName==="derived"?ty.getAttribute("name"):ty?.localName||"BOOL";const sec=v.parentElement?.localName||"";declara(E,v.getAttribute("name"),tn.toUpperCase(),{io:/input/i.test(sec)?"entrada":/output/i.test(sec)?"saida":null})});
-        [...doc.getElementsByTagName("ST")].forEach((s,i)=>{const tx=s.textContent;unidades.push({tipo:"st",nome:`POU ${i+1}`,texto:tx,ast:stParse(tx)})});
-        if(/<LD>|<FBD>|<SFC>/.test(t))avisos.push("Há redes gráficas (LD/FBD/SFC) no PLCopen: a IA traduz para texto estruturado")}
+        [...doc.getElementsByTagName("*")].filter(v=>v.localName==="variable"&&v.parentElement&&/Vars$|^localVars|^inputVars|^outputVars|^globalVars|^inOutVars/.test(v.parentElement.localName)).forEach(v=>{const ty=[...v.children].find(c=>c.localName==="type")?.firstElementChild;const tn=ty?.localName==="derived"?ty.getAttribute("name"):ty?.localName||"BOOL";const sec=v.parentElement?.localName||"";declara(E,v.getAttribute("name"),tn.toUpperCase(),{io:/input/i.test(sec)?"entrada":/output/i.test(sec)?"saida":null})});
+        plcopenUnidades(doc,E,unidades,avisos)}
       else if(d==="mitsubishi"||d==="awl"||d==="il"){const redes=t.split(/^\s*(?:NETWORK|NETZWERK|Network)\b.*$/m);redes.forEach((r,i)=>{const prog=ilParse(r,d);if(prog.length)unidades.push({tipo:"il",dial:d,nome:`${d==="awl"?"Network":d==="mitsubishi"?"Bloco":"Rede"} ${i+(redes.length>1?0:1)}`,texto:r.trim(),prog})});stDeclaracoes(t,E)}
       else if(d==="st"){stDeclaracoes(t,E);unidades.push({tipo:"st",nome:f.name||f.nome||"programa",texto:t,ast:stParse(stCorpo(t))})}
       else avisos.push(`${f.name||f.nome||"arquivo"}: formato não reconhecido; a IA deve traduzir para texto estruturado`)}
@@ -320,3 +319,76 @@ function simCard(d){const P=montarPrograma(d.fontes||[]);const cena=d.cena?.obje
   el.querySelector('[data-s="vel"]').onchange=e=>{vel=+e.target.value};
   setTimeout(async()=>{v3=await simRender(el.querySelector(".sim3d"),P,cena,ui).catch(()=>null);painel();requestAnimationFrame(t=>{ult=t;laco(t)})},30);
   return el}
+
+/* ======================= PLCopen XML (IEC 61131-10 / TC6): LD, FBD e SFC gráficos viram ST =======================
+   CODESYS, TwinCAT, Schneider (Machine Expert), B&R, Beremiz, Phoenix PLCnext, WAGO e outros exportam neste formato. */
+const kids=(el,nome)=>[...(el?.children||[])].filter(c=>c.localName===nome);
+const kid=(el,nome)=>kids(el,nome)[0];
+const desc_=(el,nome)=>[...(el?.getElementsByTagName("*")||[])].filter(c=>c.localName===nome);
+const FN_OP={AND:"AND",OR:"OR",XOR:"XOR",ADD:"+",SUB:"-",MUL:"*",DIV:"/",MOD:"MOD",GT:">",GE:">=",EQ:"=",NE:"<>",LT:"<",LE:"<="};
+function grafo(body){const nos=new Map();for(const el of body.querySelectorAll("[localId]"))nos.set(el.getAttribute("localId"),el);return nos}
+function entradas(el){const cpi=kid(el,"connectionPointIn");return cpi?kids(cpi,"connection").map(c=>({ref:c.getAttribute("refLocalId"),fp:c.getAttribute("formalParameter")})):[]}
+function pouGrafico(pou,nomePou){const body=kid(pou,"body"),corpo=body?.firstElementChild;if(!corpo)return {st:"",avisos:[]};const tipo=corpo.localName,avisos=[];
+  if(tipo==="ST")return {st:corpo.textContent,avisos};if(tipo==="IL")return {st:null,il:corpo.textContent,avisos};
+  if(tipo==="SFC")return sfcParaST(pou,corpo,nomePou);
+  return redeParaST(corpo,nomePou,avisos)}
+function redeParaST(corpo,nomePou,avisos){const nos=grafo(corpo),memo=new Map(),chamadas=[],saidas=[],emCurso=new Set();let trig=0;
+  const conectores=new Map();for(const el of nos.values())if(el.localName==="connector")conectores.set(el.getAttribute("name"),el);
+  const juntar=(ins,ctx)=>{const xs=ins.map(i=>expr(i.ref,i.fp,ctx)).filter(Boolean);return xs.length>1?"("+xs.join(" OR ")+")":xs[0]||"FALSE"};
+  function expr(id,fp){const k=id+"|"+(fp||"");if(memo.has(k))return memo.get(k);const el=nos.get(id);if(!el)return "FALSE";if(emCurso.has(k))return "FALSE";emCurso.add(k);let r="FALSE";
+    const ln=el.localName;
+    if(ln==="leftPowerRail")r="TRUE";
+    else if(ln==="inVariable"||ln==="inOutVariable")r=(kid(el,"expression")?.textContent||"FALSE").trim();
+    else if(ln==="continuation"){const c=conectores.get(el.getAttribute("name"));r=c?juntar(entradas(c)):"FALSE"}
+    else if(ln==="contact"){const v=(kid(el,"variable")?.textContent||"FALSE").trim(),pw=juntar(entradas(el));let x=v;
+      const ed=el.getAttribute("edge");if(ed==="rising"||ed==="falling"){const inst=`__TRIG${++trig}`;chamadas.push(`${inst}(CLK:=${v});`);decl.push([inst,ed==="rising"?"R_TRIG":"F_TRIG"]);x=inst+".Q"}
+      if(el.getAttribute("negated")==="true")x=`NOT ${x}`;r=pw==="TRUE"?x:`(${pw} AND ${x})`}
+    else if(ln==="coil")r=juntar(entradas(el));
+    else if(ln==="block"){const tn=(el.getAttribute("typeName")||"").toUpperCase(),inst=el.getAttribute("instanceName");
+      const ins=desc_(kid(el,"inputVariables"),"variable").map(v=>{const neg=v.getAttribute("negated")==="true";const e=juntar(entradas(v));return {nome:v.getAttribute("formalParameter"),e:neg?`NOT (${e})`:e}});
+      if(inst){r=`${inst}.${fp||"Q"}`}
+      else if(FN_OP[tn])r="("+ins.map(i=>i.e).join(` ${FN_OP[tn]} `)+")";else if(tn==="NOT")r=`NOT (${ins[0]?.e})`;else if(tn==="MOVE")r=ins[0]?.e||"0";
+      else r=`${tn}(${ins.map(i=>i.e).join(", ")})`}
+    emCurso.delete(k);memo.set(k,r);return r}
+  const decl=[];const ordem=[...nos.values()].sort((a,b)=>(+(a.getAttribute("executionOrderId")||0)-+(b.getAttribute("executionOrderId")||0))||(+a.getAttribute("localId")-+b.getAttribute("localId")));
+  for(const el of ordem){const ln=el.localName;
+    if(ln==="block"&&el.getAttribute("instanceName")){const inst=el.getAttribute("instanceName"),tn=el.getAttribute("typeName");decl.push([inst,tn]);
+      const ins=desc_(kid(el,"inputVariables"),"variable").map(v=>{const e=juntar(entradas(v));return `${v.getAttribute("formalParameter")}:=${v.getAttribute("negated")==="true"?`NOT (${e})`:e}`});chamadas.push(`${inst}(${ins.join(", ")});`)}
+    if(ln==="outVariable"||ln==="inOutVariable"){const alvo=(kid(el,"expression")?.textContent||"").trim();const ins=entradas(el);if(alvo&&ins.length)saidas.push(`${alvo} := ${juntar(ins)};`)}
+    if(ln==="coil"){const v=(kid(el,"variable")?.textContent||"").trim(),pw=juntar(entradas(el)),st=el.getAttribute("storage"),neg=el.getAttribute("negated")==="true";
+      if(st==="set")saidas.push(`IF ${pw} THEN ${v} := TRUE; END_IF;`);else if(st==="reset")saidas.push(`IF ${pw} THEN ${v} := FALSE; END_IF;`);else saidas.push(`${v} := ${neg?`NOT (${pw})`:pw};`)}}
+  const st=`(* ${nomePou}: ${corpo.localName} convertido para ST *)\n${decl.length?`VAR\n${decl.map(([n,t])=>`  ${n} : ${t};`).join("\n")}\nEND_VAR\n`:""}${chamadas.join("\n")}\n${saidas.join("\n")}`;
+  return {st,avisos}}
+function sfcParaST(pou,sfc,nomePou){const nos=grafo(sfc),avisos=[];const passos=[...nos.values()].filter(e=>e.localName==="step");
+  const nomeP=el=>"S_"+String(el.getAttribute("name")).replace(/\W/g,"_");const porNome=new Map(passos.map(s=>[s.getAttribute("name"),s]));
+  const saidaDe=new Map();for(const el of nos.values())for(const i of entradas(el)){if(!saidaDe.has(i.ref))saidaDe.set(i.ref,[]);saidaDe.get(i.ref).push(el)}
+  for(const el of nos.values())for(const v of desc_(el,"connectionPointIn"))if(v.parentElement!==el)for(const c of kids(v,"connection")){if(!saidaDe.has(c.getAttribute("refLocalId")))saidaDe.set(c.getAttribute("refLocalId"),[]);saidaDe.get(c.getAttribute("refLocalId")).push(el)}
+  const antes=(el,vis=new Set())=>{const out=[];for(const i of entradas(el)){if(vis.has(i.ref))continue;vis.add(i.ref);const n=nos.get(i.ref);if(!n)continue;if(n.localName==="step")out.push(n);else if(n.localName!=="transition")out.push(...antes(n,vis))}return out};
+  const depois=(id,vis=new Set())=>{const out=[];for(const n of saidaDe.get(id)||[]){const k=n.getAttribute("localId");if(vis.has(k))continue;vis.add(k);if(n.localName==="step")out.push(n);else if(n.localName==="jumpStep"){const t=porNome.get(n.getAttribute("targetName"));if(t)out.push(t)}else if(n.localName!=="transition"&&n.localName!=="actionBlock")out.push(...depois(k,vis))}return out};
+  const transicoes=[...nos.values()].filter(e=>e.localName==="transition");const trTexto=new Map(kids(kid(pou,"transitions"),"transition").map(t=>[t.getAttribute("name"),kid(kid(t,"body"),"ST")?.textContent?.trim()]));
+  const acoes=new Map(kids(kid(pou,"actions"),"action").map(a=>[a.getAttribute("name"),kid(kid(a,"body"),"ST")?.textContent?.trim()]));
+  const troca=s=>String(s||"").replace(/\b(\w+)\.X\b/g,(m,n)=>porNome.has(n)?"S_"+n.replace(/\W/g,"_"):m).replace(/\b(\w+)\.T\b/g,(m,n)=>porNome.has(n)?`T_${n.replace(/\W/g,"_")}.ET`:m);
+  const linhas=[],decl=[],nAcoes=new Map();
+  passos.forEach(s=>{decl.push(`  ${nomeP(s)} : BOOL := ${s.getAttribute("initialStep")==="true"?"TRUE":"FALSE"};`,`  ${nomeP(s)}_ANT : BOOL;`,`  T_${nomeP(s).slice(2)} : TON;`)});
+  transicoes.forEach((t,i)=>{let cond="FALSE";const c=kid(t,"condition");const inl=c&&kid(c,"inline"),ref=c&&kid(c,"reference");
+    if(inl)cond=kid(inl,"ST")?.textContent?.trim()||desc_(inl,"ST")[0]?.textContent?.trim()||"FALSE";else if(ref)cond=trTexto.get(ref.getAttribute("name"))?.replace(/^\s*\w+\s*:=\s*/,"").replace(/;\s*$/,"")||ref.getAttribute("name");
+    else if(c&&kid(c,"connectionPointIn")){const r=redeParaST(sfc,nomePou,[]);cond="FALSE";avisos.push("Transição ligada a rede gráfica: a IA deve conferir")}
+    const pre=antes(t),pos=depois(t.getAttribute("localId"));decl.push(`  TR_${i} : BOOL;`);
+    linhas.push({i,pre,pos,cond:troca(cond)})});
+  const tst=linhas.map(l=>`TR_${l.i} := ${l.pre.length?l.pre.map(nomeP).join(" AND "):"FALSE"} AND (${l.cond});`);
+  const fogo=linhas.map(l=>`IF TR_${l.i} THEN ${l.pre.map(s=>nomeP(s)+" := FALSE;").join(" ")} ${l.pos.map(s=>nomeP(s)+" := TRUE;").join(" ")} END_IF;`);
+  const corpoAcoes=[];
+  for(const ab of [...nos.values()].filter(e=>e.localName==="actionBlock")){const passo=antes(ab)[0]||nos.get(entradas(ab)[0]?.ref);if(!passo||passo.localName!=="step")continue;const S=nomeP(passo);
+    for(const a of kids(ab,"action")){const q=(a.getAttribute("qualifier")||"N").toUpperCase(),ref=kid(a,"reference")?.getAttribute("name"),inl=kid(a,"inline");const corpo=inl?(desc_(inl,"ST")[0]?.textContent||""):acoes.get(ref);const dur=a.getAttribute("duration");
+      if(!corpo&&ref){if(q==="N"){if(!nAcoes.has(ref))nAcoes.set(ref,[]);nAcoes.get(ref).push(S)}else if(q==="S"||q==="SD"||q==="DS")corpoAcoes.push(`IF ${S} THEN ${ref} := TRUE; END_IF;`);else if(q==="R")corpoAcoes.push(`IF ${S} THEN ${ref} := FALSE; END_IF;`);
+        else if(q==="P"||q==="P1")corpoAcoes.push(`IF ${S} AND NOT ${S}_ANT THEN ${ref} := TRUE; ELSE ${ref} := FALSE; END_IF;`);else if(q==="L")corpoAcoes.push(`${ref} := ${S} AND T_${S.slice(2)}.ET < ${dur||"T#1s"};`);else if(q==="D")corpoAcoes.push(`${ref} := ${S} AND T_${S.slice(2)}.ET >= ${dur||"T#1s"};`)}
+      else if(corpo){const cond=q==="P"||q==="P1"?`${S} AND NOT ${S}_ANT`:q==="D"?`${S} AND T_${S.slice(2)}.ET >= ${dur||"T#1s"}`:q==="L"?`${S} AND T_${S.slice(2)}.ET < ${dur||"T#1s"}`:S;corpoAcoes.push(`IF ${cond} THEN\n${troca(corpo)}\nEND_IF;`)}}}
+  const st=`(* ${nomePou}: SFC convertido para ST — cada etapa é S_<nome>, o tempo da etapa é T_<nome>.ET *)\nVAR\n${decl.join("\n")}\nEND_VAR\n${passos.map(s=>`T_${nomeP(s).slice(2)}(IN:=${nomeP(s)}, PT:=T#24h);`).join("\n")}\n${tst.join("\n")}\n${fogo.join("\n")}\n${[...nAcoes].map(([v,ss])=>`${v} := ${ss.join(" OR ")};`).join("\n")}\n${corpoAcoes.join("\n")}\n${passos.map(s=>`${nomeP(s)}_ANT := ${nomeP(s)};`).join("\n")}`;
+  return {st,avisos}}
+function plcopenUnidades(doc,E,unidades,avisos){const pous=[...doc.getElementsByTagName("*")].filter(e=>e.localName==="pou");
+  for(const pou of pous){const nome=pou.getAttribute("name");
+    try{const r=pouGrafico(pou,nome);avisos.push(...r.avisos);
+      if(r.il!=null){const prog=ilParse(r.il,"il");if(prog.length)unidades.push({tipo:"il",dial:"il",nome:`${nome} (IL)`,texto:r.il,prog});continue}
+      if(r.st){stDeclaracoes(r.st,E);const ling=kid(kid(pou,"body"),"*")?.localName||kid(pou,"body")?.firstElementChild?.localName;unidades.push({tipo:"st",nome:`${nome} (${ling})`,texto:r.st,ast:stParse(stCorpo(r.st))})}
+      for(const a of kids(kid(pou,"actions"),"action")){const b=kid(kid(a,"body"),"ST");if(b&&kid(kid(pou,"body"),"SFC")==null)unidades.push({tipo:"st",nome:`${nome}.${a.getAttribute("name")}`,texto:b.textContent,ast:stParse(b.textContent)})}}
+    catch(e){avisos.push(`${nome}: ${e.message}`)}}}

@@ -94,7 +94,7 @@ function resumoRaizes(r){const v=Object.values(r);if(!v.length)return null;retur
 
 async function baseIniciar(){try{BASE.info=resumoRaizes(await raizes());const dir=await kvGet("pasta");if(dir){BASE.pasta=dir.name;if(await permissao(dir,false))BASE.dir=dir}}catch(e){}avisa();
   await baseSincronizar().catch(e=>console.warn("mapa da unidade:",e));
-  if(BASE.dir)baseAtualizar({silencioso:true})}
+  if(BASE.dir){const r=(await raizes())[BASE.pasta]||{};if(!r.verificado||Date.now()-r.verificado>12*3600e3)setTimeout(()=>baseAtualizar({silencioso:true,modo:"rapido"}),8000)}}
 async function baseTrocouUnidade(){BASE.parar=true;await docsClear();await kvSet("raizes",{});BASE.info=null;BASE.cache.clear();avisa()}
 async function baseEscolherPasta(){
   if(!BASE.suporte){const inp=document.createElement("input");inp.type="file";inp.webkitdirectory=true;inp.multiple=true;inp.onchange=()=>baseIndexarLista([...inp.files]);inp.click();return}
@@ -104,7 +104,7 @@ async function baseEscolherPasta(){
   baseAtualizar()}
 async function baseReconectar(){const dir=await kvGet("pasta");if(!dir)return baseEscolherPasta();if(await permissao(dir,true)){BASE.dir=dir;BASE.pasta=dir.name;avisa();baseAtualizar()}}
 function basePausar(){BASE.parar=true}
-async function docsDaRaiz(raiz){return (await docsAll()).filter(d=>raizDe(d.p)===raiz)}
+async function docsDaRaiz(raiz){const d=await idb();return reqP(d.transaction("docs").objectStore("docs").getAll(IDBKeyRange.bound(raiz+"/",raiz+"/\uffff")))}
 
 /* ---------- arquivo de índice dentro da pasta */
 async function salvarIndice(){if(!BASE.dir)return;try{const docs=await docsDaRaiz(BASE.pasta);const json=JSON.stringify({versao:2,pasta:BASE.pasta,gerado:new Date().toISOString(),docs});
@@ -147,12 +147,19 @@ async function indexarUm(p,file,ext){const reg={p,n:file.name,e:ext,s:file.size,
   catch(e){reg.t=nomeT;reg.x="não consegui ler: "+String(e.message||e).slice(0,80);BASE.prog.erros++}
   if(!reg.t.length)reg.t=nomeT;return reg}
 
-async function baseAtualizar({silencioso}={}){if(BASE.rodando||!BASE.dir)return;if(!(await permissao(BASE.dir,!silencioso))){BASE.dir=null;avisa();return}
-  BASE.rodando=true;BASE.parar=false;const P=BASE.prog,raiz=BASE.pasta;Object.assign(P,{fase:"Mapeando a pasta",total:0,feitos:0,lidos:0,bytes:0,eventos:0,erros:0,inicio:Date.now()});avisa();
+/* Atualização incremental. O que já está no mapa nunca é relido.
+   - rápida (automática ao abrir, no máximo 1 vez a cada 12 h): só lista os nomes; lê apenas arquivos novos e tira os que sumiram.
+   - completa (botão Atualizar): confere também tamanho e data de cada arquivo para achar os que foram alterados. */
+async function docsMeta(raiz){const d=await idb();return new Promise((res,rej)=>{const m=new Map(),r=d.transaction("docs").objectStore("docs").openCursor(IDBKeyRange.bound(raiz+"/",raiz+"/\uffff"));
+  r.onsuccess=()=>{const c=r.result;if(!c)return res(m);const v=c.value;m.set(v.p,{s:v.s,m:v.m});c.continue()};r.onerror=()=>rej(r.error)})}
+async function baseAtualizar({silencioso,modo="completo"}={}){if(BASE.rodando||!BASE.dir)return;if(!(await permissao(BASE.dir,!silencioso))){BASE.dir=null;avisa();return}
+  BASE.rodando=true;BASE.parar=false;const P=BASE.prog,raiz=BASE.pasta;const conhecidos=await docsMeta(raiz).catch(()=>new Map());
+  Object.assign(P,{fase:conhecidos.size?"Conferindo alterações":"Mapeando a pasta",modo,total:0,feitos:0,conferidos:0,conhecidos:conhecidos.size,lidos:0,bytes:0,eventos:0,erros:0,inicio:Date.now()});avisa();
   let mudou=false;
-  try{const conhecidos=new Map((await docsDaRaiz(raiz)).map(d=>[d.p,d]));const fila=[],vistos=new Set();let tot=0,bytes=0;
-    for await(const [rel,h] of andarPasta(BASE.dir)){if(BASE.parar)break;const p=raiz+"/"+rel,f=await h.getFile();vistos.add(p);tot++;bytes+=f.size;const k=conhecidos.get(p);
-      if(!k||k.s!==f.size||k.m!==f.lastModified)fila.push([p,h]);if(tot%500===0){P.total=tot;P.bytes=bytes;avisa();await new Promise(r=>setTimeout(r,0))}}
+  try{const fila=[],vistos=new Set();let tot=0,bytes=0;const rap=modo==="rapido"&&conhecidos.size>0;
+    for await(const [rel,h] of andarPasta(BASE.dir)){if(BASE.parar)break;const p=raiz+"/"+rel;vistos.add(p);tot++;const k=conhecidos.get(p);
+      if(rap&&k){bytes+=k.s||0}else{const f=await h.getFile();bytes+=f.size;if(!k||k.s!==f.size||k.m!==f.lastModified)fila.push([p,h])}
+      P.conferidos=tot;if(tot%1000===0){P.total=tot;P.bytes=bytes;avisa();await new Promise(r=>setTimeout(r,0))}}
     if(!BASE.parar){const sumiram=[...conhecidos.keys()].filter(p=>!vistos.has(p));if(sumiram.length){mudou=true;await docsDel(sumiram)}}
     P.total=fila.length;P.bytes=bytes;P.fase=fila.length?"Lendo os arquivos":"Base em dia";avisa();
     const lote=[];let ult=Date.now();if(fila.length)mudou=true;
@@ -160,9 +167,10 @@ async function baseAtualizar({silencioso}={}){if(BASE.rodando||!BASE.dir)return;
       lote.push(await indexarUm(p,f,ext));P.feitos++;
       if(lote.length>=40||Date.now()-ult>4000){await docsPut(lote.splice(0));ult=Date.now();avisa()}
       if(P.feitos%800===0)await salvarIndice()}
-    await docsPut(lote);
-    await gravaRaiz(raiz,{arquivos:(await docsDaRaiz(raiz)).length,bytes,atualizado:mudou?Date.now():((await raizes())[raiz]?.atualizado||Date.now()),completo:!BASE.parar,remoto:false});
-    if(mudou||!(await raizes())[raiz]?.publicado){await salvarIndice();P.fase="Compartilhando o mapa com a unidade";avisa();await publicarMapa(raiz).catch(e=>console.warn("publicar mapa:",e))}
+    await docsPut(lote);const ant=(await raizes())[raiz]||{};
+    await gravaRaiz(raiz,{arquivos:mudou?(await docsMeta(raiz)).size:(ant.arquivos||conhecidos.size),bytes,atualizado:mudou?Date.now():(ant.atualizado||Date.now()),verificado:BASE.parar?ant.verificado:Date.now(),completo:!BASE.parar,remoto:false});
+    if((mudou||!ant.publicado)&&(typeof PAPEL==="undefined"||PAPEL?.atualiza_base!==false)){await salvarIndice();P.fase="Compartilhando o mapa com a unidade";avisa();await publicarMapa(raiz).catch(e=>console.warn("publicar mapa:",e))}
+    else if(mudou)await salvarIndice();
     P.fase=BASE.parar?"Pausado":"Base em dia"}
   catch(e){P.fase="Erro: "+(e.message||e);console.error(e)}
   BASE.rodando=false;BASE.parar=false;avisa()}
