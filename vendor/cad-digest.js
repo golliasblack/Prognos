@@ -45,9 +45,15 @@ export function resumoCAD(db, opt = {}) {
   const lista = []; const linhas = new Map();
   for (const t of textos) { const k = Math.round(t.y / 40); if (!linhas.has(k)) linhas.set(k, []); linhas.get(k).push(t) }
   for (const l of linhas.values()) { l.sort((a, b) => a.x - b.x); const s = l.map(t => t.t).join(" "); if (/^\d{3}\s+\d{4,6}\s+\d+\s+(U|M|m|KG|kg)\b/.test(s)) lista.push(s) }
+  // etiquetas (tags) e folhas: úteis em desenhos elétricos, de tubulação e instrumentação
+  const tagRe = /^[A-Z]{1,5}[-_ ]?\d{2,5}[A-Z]?(?:[-_.][A-Z0-9]{1,6}){0,3}$/;
+  const todosTextos = [...textos.map(t => t.t), ...itens.flatMap(i => i.attr)];
+  const contTag = {}; for (const t of todosTextos) { const k = t.trim(); if (k.length <= 24 && tagRe.test(k)) contTag[k] = (contTag[k] || 0) + 1 }
+  const tags = Object.entries(contTag).sort((a, b) => b[1] - a[1]).slice(0, 120).map(([k, n]) => n > 1 ? `${k}×${n}` : k);
+  const folhas = (db.objects?.LAYOUT || db.layouts || []).map(l => l.layoutName || l.name).filter(n => n && !/^model$/i.test(n)).slice(0, 40);
   const camadas = {}; for (const e of ents) camadas[e.layer] = (camadas[e.layer] || 0) + 1;
   const notas = textos.filter(t => /^\s*\d?[.)]?\s*(ALL|FOR|THE|CONCRETE|TODAS|PARA)\b/i.test(t.t) || /NOTES?:?/i.test(t.t)).map(t => t.t).filter((v, i, a) => a.indexOf(v) === i).slice(0, 12);
-  return { vistas: vistas.sort((p, q) => q.n_cotas - p.n_cotas), lista_pecas: lista.filter((v, i, a) => a.indexOf(v) === i).slice(0, 60), notas, camadas_principais: Object.entries(camadas).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => k + ":" + v) };
+  return { folhas, tags, vistas: vistas.sort((p, q) => q.n_cotas - p.n_cotas), lista_pecas: lista.filter((v, i, a) => a.indexOf(v) === i).slice(0, 60), notas, camadas_principais: Object.entries(camadas).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => k + ":" + v) };
 }
 
 // Paredes e lajes de um corte: pares de linhas paralelas cuja distância é uma espessura cotada no desenho. Coordenadas: x ao longo da cota horizontal maior; z em mm a partir do fundo da laje (z = cota_fundo + altura acima dela).
