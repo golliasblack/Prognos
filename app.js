@@ -501,6 +501,11 @@ async function send(){if(busy){ctl?.abort();return}const text=$("inp").value.tri
       if(forcar&&!tool3d&&!res.content.some(b=>b.type==="text"&&b.text.trim())&&!res.content.some(b=>b.type==="tool_use")){const t="Não consegui que nenhuma IA gratuita redigisse a resposta agora (limite de uso por minuto). Os arquivos achados estão nos cartões acima. Tente de novo em um minuto ou peça: \"resuma o que você achou\".";myEl.innerHTML=md(t);amsg.parts.push({t:"text",v:t});res.content=[{type:"text",text:t}]}
       CONV.api.push({role:"assistant",content:res.content.length?res.content:[{type:"text",text:"(sem resposta)"}]});
       if(res.content.some(b=>b.type==="text"&&b.text.trim().length>20))deuTexto=true;
+      /* IA devolveu o JSON do modelo como texto em vez de chamar a ferramenta: aproveita */
+      if(forcar&&tool3d&&!res.content.some(b=>b.type==="tool_use")){const tb=res.content.find(b=>b.type==="text"&&/"equipamentos"|"pecas"/.test(b.text||""));
+        if(tb){const T=tb.text;let i=T.search(/\{\s*"(modelo|nome|equipamentos|pecas)"/);if(i>=0){let d=0,j=i,str=false,esc=false;for(;j<T.length;j++){const ch=T[j];if(str){if(esc)esc=false;else if(ch==="\\")esc=true;else if(ch==='"')str=false;continue}if(ch==='"')str=true;else if(ch==="{")d++;else if(ch==="}"){d--;if(!d){j++;break}}}
+          try{const o=JSON.parse(T.slice(i,j));const resto=(T.slice(0,i)+T.slice(j)).replace(/```(json)?/g,"").trim();tb.text=resto||"Modelo montado.";myEl.innerHTML=md(tb.text);myPart.v=tb.text;
+            res.content.push({type:"tool_use",id:"tu_"+Date.now().toString(36),name:"modelo_3d",input:o.modelo?o:{modelo:o}})}catch(e){}}}}
       const calls=res.content.filter(b=>b.type==="tool_use");
       if(forcar&&tool3d&&calls.length&&calls.every(c=>c.name==="modelo_3d")){tool3d=false;fez3d=true}
       else if(res.stop!=="tool_use"||!calls.length||forcar){if(!deuTexto&&!forcar){forcar=true;CONV.api.push({role:"user",content:[{type:"text",text:FINAL}]});continue}break}
