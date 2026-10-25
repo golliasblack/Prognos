@@ -55,6 +55,23 @@ conversa + fotos + documentos
   - livros: Open Library, Internet Archive e Projeto Gutenberg;
   - enciclopédia: Wikipédia.
 
+## Formatos que ele lê
+
+Tudo é lido no computador de quem usa; os arquivos não saem da planta.
+
+| Tipo | Extensões | Como |
+|---|---|---|
+| Documentos | PDF, DOC, DOCX, ODT, RTF, TXT, PPT, PPTX, ODP, HTML, XML, e-mail | texto completo; PDF digitalizado passa por OCR |
+| Planilhas | XLS, XLSX, XLSB, ODS, CSV | células e abas; exportações do SAP viram histórico |
+| Desenhos | DWG, DWF, DXF, SVG | textos, carimbo, blocos, atributos, cotas e camadas |
+| Imagens | TIF, JPG, PNG, BMP, GIF, WEBP | OCR em português e inglês |
+| Vídeo e áudio | MP4, MOV, MKV, AVI, WEBM, MP3, WAV, FLAC, M4A | duração, etiquetas e OCR de quadros do vídeo |
+| CLP | ST, SCL, AWL/IL, L5X, PLCopen XML e projetos | as 5 linguagens da IEC 61131-3 |
+| 3D | STEP, IGES, IFC, STL, OBJ | modelo e interferências |
+| Pacotes e programas | ZIP, RAR, 7Z, EXE, DLL, BAT | conteúdo do ZIP lido por dentro; nos demais, nomes e informações de versão |
+
+A primeira passada mapeia a pasta rápido. A **leitura profunda** abre depois, em segundo plano, o que só era conhecido pelo nome (DWG, OCR, vídeo, pacotes) e continua de onde parou.
+
 ## Tecnologia
 
 App web estático (HTML e JavaScript), banco PostgreSQL com busca em texto completo e funções de servidor no Supabase, e um leitor de arquivos em Python que roda no PC do usuário.

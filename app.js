@@ -453,7 +453,7 @@ Como conversar:
 - Você só recomenda; não altera processo nem CLP. Mudança de lógica ou sintonia sempre com plano de teste.
 
 Como usar as ferramentas:
-- Sempre que o usuário citar equipamento, peça, fornecedor, desenho ou documento, use buscar_base e historico_equipamento antes de concluir. A base da planta é a pasta do usuário, mapeada no computador dele: buscar_base acha os arquivos pelo mapa e traz trechos; para ler mais de um documento, use ler_arquivo_base. Cite o caminho do arquivo e a página.
+- Sempre que o usuário citar equipamento, peça, fornecedor, desenho ou documento, use buscar_base e historico_equipamento antes de concluir. A base da planta é a pasta do usuário, mapeada no computador dele: buscar_base acha os arquivos pelo mapa e traz trechos; para ler mais de um documento, use ler_arquivo_base. Cite o caminho do arquivo e a página. Se a busca vier vazia ou fora do assunto, reformule antes de desistir: escreva tags de vários jeitos (PR04, PR-04, PR 04), use o nome da pasta (ex.: PONTES, PR-04), sinônimos e abreviações (ponte rolante, PR; redutor, red.), números de desenho (DEI..., MEC, ELE) e termos em inglês; faça duas ou três buscas curtas em vez de uma longa.
 - Quando o usuário relatar um evento datado, grave com registrar_evento sem pedir licença e diga em uma linha o que gravou. Quando contar o desfecho real ou disser que a previsão errou, use registrar_retorno (com horas_ate_falha e regime se souber): a lição, sem identificação, passa a valer para todas as plantas da rede Prognos. Anexos chegam como [Anexo A1 ...]; use ler_anexo para documentos longos.
 ${secoesPrompt()}
 - Os cartões já mostram os números ao usuário; no texto, interprete e recomende em vez de repetir tudo.
@@ -473,10 +473,13 @@ async function send(){if(busy){ctl?.abort();return}const text=$("inp").value.tri
   let curText=null,curEl=null;const scroll=()=>{const th=$("thread");if(th.scrollHeight-th.scrollTop-th.clientHeight<240)th.scrollTop=1e9};
   const ui={card:(k,v)=>{amsg.parts.push({t:"card",k,v});const el=CARDS[k](v);wrap.append(el);curEl=null;scroll();return el},step:t=>{amsg.parts.push({t:"step",v:t});const d=document.createElement("div");d.className="step";d.textContent=t;wrap.append(d);curEl=null;scroll()}};
   busy=true;setBusy(true);ctl=new AbortController();
-  try{for(let turn=0;turn<12;turn++){curText={t:"text",v:""};curEl=document.createElement("div");curEl.className="md";wrap.append(curEl);const myEl=curEl,myPart=curText;let shown=false;
+  let pular=[],vazias=0;
+  try{for(let turn=0;turn<14;turn++){curText={t:"text",v:""};curEl=document.createElement("div");curEl.className="md";wrap.append(curEl);const myEl=curEl,myPart=curText;let shown=false;
       if(typeof assistPoda==="function")assistPoda(CONV.api);
-      const res=await iaStream({tier:$("tier").value,system:systemPrompt(),tools:ferramentasDoPedido(),max_tokens:8000,messages:CONV.api},{signal:ctl.signal,onText:t=>{myPart.v=t;myEl.innerHTML=md(t);if(!shown){amsg.parts.push(myPart);shown=true}scroll()}});
+      const res=await iaStream({tier:$("tier").value,system:systemPrompt(),tools:ferramentasDoPedido(),max_tokens:8000,messages:CONV.api,pular},{signal:ctl.signal,onText:t=>{myPart.v=t;myEl.innerHTML=md(t);if(!shown){amsg.parts.push(myPart);shown=true}scroll()}});
       if(!shown&&!myPart.v)myEl.remove();if(res.prov?.provedor){amsg.prov=res.prov;lastProv=res.prov}
+      /* resposta vazia (sem texto e sem ferramenta): tenta de novo em outra IA */
+      if(!res.content.some(b=>(b.type==="text"&&b.text.trim())||b.type==="tool_use")&&vazias<2){vazias++;if(res.prov?.provedor)pular.push(res.prov.provedor);ui.step(`A IA ${res.prov?.provedor||""} não respondeu; tentando outra…`);continue}
       CONV.api.push({role:"assistant",content:res.content.length?res.content:[{type:"text",text:"(sem resposta)"}]});
       const calls=res.content.filter(b=>b.type==="tool_use");if(res.stop!=="tool_use"||!calls.length)break;
       const results=[];for(const c of calls){const st=document.createElement("div");st.className="step run";st.textContent=(TOOL_LABEL[c.name]||c.name)+"…";wrap.append(st);scroll();
@@ -519,11 +522,13 @@ function baseResumo(){const P=BASE.prog,I=BASE.info;
   const txt=`Base${PERFIL?" de "+PERFIL.unidade_nome:""}: ${fmtN(I.arquivos)} arquivos · ${fmtGB(I.bytes)} · atualizada ${quandoFoi(I.atualizado)}`;
   if(!BASE.dir&&!I.semPasta)return {estado:"semoriginais",txt};
   return {estado:"ok",txt}}
-function renderBase(){const r=baseResumo(),el=$("kbStat");if(!el)return;
-  el.innerHTML=`<div class="basebar"><div class="lin"><span>${esc(r.txt)}</span></div>${r.estado==="rodando"?`<div class="prog"><i style="width:${r.pct}%"></i></div><div class="lin"><button class="link" data-b="pausar">Pausar</button></div>`:
+function renderBase(){const r=baseResumo(),el=$("kbStat");if(!el)return;if(BASE.dir&&!BASE.rodando&&typeof contarPendentesProfunda==="function"&&(!BASE._pendT||Date.now()-BASE._pendT>60000)){BASE._pendT=Date.now();contarPendentesProfunda().then(n=>{if(n!==BASE._pend){BASE._pend=n;renderBase()}})}
+  const prof=typeof PROF!=="undefined"&&PROF.rodando?`<div class="lin"><span>${esc(PROF.fase)} · ${fmtN(PROF.feitos)} de ${fmtN(PROF.total)}</span></div><div class="prog"><i style="width:${PROF.total?Math.round(PROF.feitos/PROF.total*100):0}%"></i></div><div class="lin"><button class="link" data-b="pausarprof">Pausar leitura profunda</button></div>`
+    :(BASE.dir&&BASE._pend>0&&!BASE.rodando&&(typeof PAPEL==="undefined"||PAPEL?.atualiza_base!==false))?`<div class="lin"><button class="link" data-b="profunda" title="Abre por dentro tudo que foi mapeado só pelo nome: DWG, DWF, PDF digitalizado, TIF e imagens (OCR), vídeos (quadros com OCR), áudio, ODT/ODP, ZIP/RAR/7Z, EXE/DLL e outros formatos. Demora: roda em segundo plano">Leitura profunda · ${fmtN(BASE._pend)} arquivos</button></div>`:"";
+  el.innerHTML=`<div class="basebar">${prof}<div class="lin"><span>${esc(r.txt)}</span></div>${r.estado==="rodando"?`<div class="prog"><i style="width:${r.pct}%"></i></div><div class="lin"><button class="link" data-b="pausar">Pausar</button></div>`:
     (typeof PAPEL!=="undefined"&&PAPEL&&PAPEL.atualiza_base===false&&r.estado!=="semoriginais")?`<div class="lin"><span class="kb">${r.estado==="vazia"?"Peça ao administrador da unidade para conectar a base.":"Atualizada pelo administrador da unidade."}</span></div>`:`<div class="lin">${r.estado==="vazia"?`<button class="link" data-b="pasta">Conectar pasta</button>`:r.estado==="semoriginais"?`<button class="link" data-b="reconectar" title="Opcional: permite abrir os documentos originais">Conectar pasta</button>`:`<button class="link" data-b="atualizar">Atualizar</button><button class="link" data-b="pasta">Outra pasta</button>`}</div>`}</div>`;
   const o=$("onb");if(o)o.outerHTML=onbHTML();ligaOnb()}
-function acaoBase(b){if(b==="pasta")baseEscolherPasta();else if(b==="reconectar")baseReconectar();else if(b==="atualizar")baseAtualizar();else if(b==="pausar")basePausar()}
+function acaoBase(b){if(b==="profunda"){baseProfunda();return}if(b==="pausarprof"){PROF.parar=true;return}if(b==="pasta")baseEscolherPasta();else if(b==="reconectar")baseReconectar();else if(b==="atualizar")baseAtualizar();else if(b==="pausar")basePausar()}
 function onbHTML(){const r=baseResumo(),P=BASE.prog;
   if(r.estado==="ok"||r.estado==="semoriginais")return `<div id="onb" hidden></div>`;
   if(r.estado==="rodando"&&BASE.info?.arquivos&&P.fase!=="Lendo os arquivos")return `<div id="onb" hidden></div>`;

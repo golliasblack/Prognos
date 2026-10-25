@@ -155,6 +155,7 @@ function streamAnthropic(corpo: ReadableStream<Uint8Array>, modelo: string): Rea
         if (tools.size) fim = "tool_use";
         fechaTexto();
         for (const t of tools.values()) send("content_block_stop", { type: "content_block_stop", index: t.i });
+        console.log(JSON.stringify({ ev: "ia_fim", modelo, fim, ferramentas: tools.size, texto: idx }));
         send("message_delta", { type: "message_delta", delta: { stop_reason: fim }, usage: { output_tokens: uso.completion_tokens ?? 0, input_tokens: uso.prompt_tokens ?? 0 } });
         send("message_stop", { type: "message_stop" });
       } catch (e) {
@@ -202,22 +203,26 @@ Deno.serve(async (req) => {
   if (!fila.length) fila = ativos;
   if (img) { const comVisao = fila.filter((p) => p.visao); if (comVisao.length) fila = comVisao; }
   if (b.provedor) { const p = ativos.find((x) => x.id === b.provedor); if (p) fila = [p, ...fila.filter((x) => x !== p)]; }
+  if (Array.isArray(b.pular) && b.pular.length) { const sem = fila.filter((p) => !b.pular.includes(p.nome) && !b.pular.includes(p.id)); if (sem.length) fila = sem; }
 
   const erros: string[] = [];
   for (const p of fila) {
     const modelo = p.tipo === "anthropic"
       ? ({ quick: env("MODELO_ANTHROPIC_RAPIDO") || "claude-haiku-5-5", complex: env("MODELO_ANTHROPIC_PROFUNDO") || "claude-opus-5-5" } as any)[b.tier] ?? p.modelo
       : (rapido && p.modeloRapido) ? p.modeloRapido : p.modelo;
+    const t0 = Date.now(), ctl = new AbortController(), limite = setTimeout(() => ctl.abort(), 45000);
     try {
       let r: Response;
       if (p.tipo === "anthropic") {
         const payload: any = { model: modelo, max_tokens: Math.min(Math.max(+b.max_tokens || 8000, 256), 32000), messages: b.messages, stream };
         if (b.system) payload.system = b.system;
         if (Array.isArray(b.tools) && b.tools.length) payload.tools = b.tools;
-        r = await fetch(`${p.base}/messages`, { method: "POST", headers: { "x-api-key": p.chave, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(payload) });
+        r = await fetch(`${p.base}/messages`, { method: "POST", signal: ctl.signal, headers: { "x-api-key": p.chave, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(payload) });
       } else {
-        r = await fetch(`${p.base}/chat/completions`, { method: "POST", headers: { ...(p.chave !== "-" ? { Authorization: `Bearer ${p.chave}` } : {}), "Content-Type": "application/json", ...(p.extra ?? {}) }, body: JSON.stringify(paraOpenAI(b, modelo, stream)) });
+        r = await fetch(`${p.base}/chat/completions`, { method: "POST", signal: ctl.signal, headers: { ...(p.chave !== "-" ? { Authorization: `Bearer ${p.chave}` } : {}), "Content-Type": "application/json", ...(p.extra ?? {}) }, body: JSON.stringify(paraOpenAI(b, modelo, stream)) });
       }
+      clearTimeout(limite);
+      console.log(JSON.stringify({ ev: "ia", provedor: p.id, modelo, status: r.status, ms: Date.now() - t0, stream, tools: (b.tools || []).length }));
       if (!r.ok) {
         const t = (await r.text()).slice(0, 300);
         erros.push(`${p.nome} ${r.status}: ${t}`);
@@ -230,6 +235,8 @@ Deno.serve(async (req) => {
       if (stream) return new Response(streamAnthropic(r.body!, modelo), { status: 200, headers: { ...h, "Content-Type": "text/event-stream" } });
       return new Response(JSON.stringify(respostaAnthropic(await r.json(), modelo)), { status: 200, headers: { ...h, "Content-Type": "application/json" } });
     } catch (e) {
+      clearTimeout(limite); console.log(JSON.stringify({ ev: "ia_erro", provedor: p.id, ms: Date.now() - t0, erro: String(e).slice(0, 200) }));
+      if (String(e).includes("abort")) pausa.set(p.id, Date.now() + 120_000);
       erros.push(`${p.nome}: ${String(e).slice(0, 200)}`);
     }
   }

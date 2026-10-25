@@ -16,7 +16,7 @@ const STOPW=new Set("que com para por dos das uma uns nos nas sem mais como qual
 const normB=s=>String(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
 function termosDe(t,max){const c=new Map();for(const w of normB(t).match(/[a-z0-9](?:[a-z0-9_\-\/.]*[a-z0-9])?/g)||[]){
   if(w.length<3||w.length>40||STOPW.has(w)||/^\d{1,3}$/.test(w)||/^\d+[.,]\d+$/.test(w))continue;const p=/\d/.test(w)&&/[a-z]/.test(w)?3:1;c.set(w,(c.get(w)||0)+p)}
-  return [...c.entries()].sort((a,b)=>b[1]-a[1]).slice(0,max).map(x=>x[0])}
+  const top=[...c.entries()].sort((a,b)=>b[1]-a[1]).slice(0,max).map(x=>x[0]);for(const w of top.slice()){const m=w.match(/^([a-z]{1,6})[-_.\/]0*(\d{1,6})([a-z]?)$/);if(m)top.push(m[1]+m[2]+m[3]);else if(/[-_.\/]/.test(w))for(const x of w.split(/[-_.\/]+/))if(x.length>=3&&!STOPW.has(x)&&!/^\d{1,3}$/.test(x))top.push(x)}return [...new Set(top)]}
 function avisa(){for(const f of BASE.ouvintes)try{f()}catch(e){}}
 
 /* ---------- armazenamento no navegador */
@@ -36,15 +36,23 @@ async function docsGet(keys){const d=await idb();const s=d.transaction("docs").o
 async function chavesPorTermo(t){const d=await idb();return reqP(d.transaction("docs").objectStore("docs").index("t").getAllKeys(t))}
 
 /* ---------- tipos de arquivo */
-const TIPO_EXT={texto:/^(pdf|docx|doc|pptx|ppt|txt|rtf|md|xml|html?|json|log|eml|msg|l5x|l5k|scl|st|awl|stl|exp|iec|prg|udt|ini|cfg)$/,
-  tabela:/^(xlsx|xlsm|xls|ods|csv|tsv)$/,dxf:/^dxf$/,imagem:/^(jpe?g|png|tiff?|bmp|gif|webp|heic)$/,video:/^(mp4|avi|mov|mkv|wmv|m4v|3gp)$/,
-  cad:/^(dwg|dgn|step|stp|igs|iges|sldprt|sldasm|slddrw|ipt|iam|idw|prt|asm|catpart|catproduct|x_t|sat|stl|3dm|rvt|ifc)$/,zip:/^(zip)$/};
+const TIPO_EXT={texto:/^(pdf|docx|docm|doc|dotx|odt|ott|rtf|pptx|pptm|ppt|ppsx|pps|odp|txt|md|xml|html?|json|log|eml|msg|svg|l5x|l5k|scl|st|stl|awl|exp|iec|prg|udt|ini|cfg|conf|yaml|yml|bat|cmd|ps1|vbs|sh|py|js|sql|reg|nfo|tex|srt|vtt|xaml|plcopen|tsproj|ap\d+|s7p|acd|mer|apa)$/,
+  tabela:/^(xlsx|xlsm|xlsb|xls|ods|ots|csv|tsv)$/,dxf:/^dxf$/,imagem:/^(jpe?g|png|tiff?|bmp|gif|webp|heic)$/,video:/^(mp4|avi|mov|mkv|wmv|m4v|3gp|webm|mpe?g)$/,audio:/^(mp3|wav|flac|m4a|aac|ogg|oga|opus|wma)$/,
+  cad:/^(dwg|dwf|dwfx|dgn|step|stp|igs|iges|sldprt|sldasm|slddrw|ipt|iam|idw|prt|asm|catpart|catproduct|x_t|sat|stl|3dm|rvt|ifc)$/,zip:/^(zip|rar|7z|gz|tgz|tar)$/,programa:/^(exe|dll|msi|sys|ocx|com)$/};
 const tipoDe=ext=>Object.keys(TIPO_EXT).find(k=>TIPO_EXT[k].test(ext))||"outro";
-const textoBinario=ab=>{const t=new TextDecoder("latin1").decode(ab);return (t.match(/[A-Za-zÀ-ÿ0-9 ,.;:()\/%°ºª\-]{6,}/g)||[]).filter(s=>/[A-Za-zÀ-ÿ]{3}/.test(s)).join(" ")};
+const textoUTF16=ab=>{const t=new TextDecoder("utf-16le").decode(ab.byteLength%2?ab.slice(0,ab.byteLength-1):ab);return (t.match(/[A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9 ,.;:()\/%°ºª\-_#=+]{4,}/g)||[]).filter(s=>/[A-Za-z]{3}/.test(s)&&/[aeiouAEIOU]/.test(s)).join(" ")};
+const pareceTexto=ab=>{const u=new Uint8Array(ab,0,Math.min(ab.byteLength,4096));let ruim=0;for(const b of u)if(b===0||(b<9)||(b>13&&b<32))ruim++;return ruim/Math.max(u.length,1)<.02};
+const textoBinario=ab=>{const t=new TextDecoder("latin1").decode(ab);const vistos=new Set();return (t.match(/[A-Za-z0-9][A-Za-zÀ-ÿ0-9 ,.;:()\/%°ºª\-_#=+]{4,}/g)||[]).map(s=>s.trim()).filter(s=>{if(s.length<5||vistos.has(s))return false;const ac=(s.match(/[À-ÿ]/g)||[]).length,le=(s.match(/[A-Za-z]/g)||[]).length;const ok=/[A-Za-z]{3}/.test(s)&&/[aeiouAEIOU]/.test(s)&&ac/s.length<.15&&le/s.replace(/ /g,"").length>.45;if(ok)vistos.add(s);return ok}).join(" ")};
 
 async function extrairTexto(file,ext){
+  if(ext==="dwg"&&typeof lerDWG==="function"&&file.size<150e6){const x=await lerDWG(file);return {pg:0,linhas:null,pf:1,...x}}
+  if(/^dwfx?$/.test(ext)&&typeof lerDWF==="function"&&file.size<150e6){try{const x=await lerDWF(file);return {pg:0,linhas:null,pf:1,...x}}catch(e){}}
   const tipo=tipoDe(ext),out={k:tipo,texto:"",pg:0,linhas:null};
-  if(["imagem","video","cad","outro"].includes(tipo))return out;
+  if(["imagem","video","audio","cad"].includes(tipo))return out;
+  if(tipo==="programa"){const parte=file.size>8e6?new Blob([file.slice(0,4e6),file.slice(file.size-4e6)]):file;const ab=await parte.arrayBuffer();
+    const t16=textoUTF16(ab),info=[...t16.matchAll(/(CompanyName|FileDescription|ProductName|ProductVersion|FileVersion|OriginalFilename|LegalCopyright)\s+([^|]{2,80}?)(?=\s+[A-Z][a-z]+[A-Z]|\s*$)/g)].map(m=>m[1]+": "+m[2].trim());
+    out.texto=(info.length?"Programa · "+[...new Set(info)].join(" · ")+"\n":"")+t16.slice(0,4000);return out}
+  if(tipo==="outro"){if(file.size>20e6)return out;const ab=await file.arrayBuffer();out.texto=pareceTexto(ab)?decodeText(ab):(textoBinario(ab)+" "+textoUTF16(ab)).slice(0,60000);if(out.texto.trim().length>40)out.k="texto";return out}
   const cap=ext==="pdf"?120e6:60e6;if(file.size>cap){out.nota="grande demais para ler; indexado pelo nome";return out}
   const ab=await file.arrayBuffer();
   if(ext==="pdf"){await need("pdf");const pdf=await pdfjsLib.getDocument({data:ab,isEvalSupported:false}).promise;out.pg=pdf.numPages;const n=Math.min(pdf.numPages,400);let t="";
@@ -57,9 +65,16 @@ async function extrairTexto(file,ext){
     else{await need("xlsx");const wb=XLSX.read(ab,{type:"array",cellDates:true});for(const nm of wb.SheetNames.slice(0,12)){const r=XLSX.utils.sheet_to_json(wb.Sheets[nm],{header:1,raw:true,defval:""});out.texto+=`\n[aba ${nm}]\n`;linhas.push(...r);if(linhas.length>200000)break}}
     out.linhas=linhas;out.texto+=linhas.slice(0,3000).map(r=>r.map(c=>c instanceof Date?iso(c):String(c??"")).join(" | ")).join("\n");return out}
   if(ext==="dxf"){out.k="desenho";out.texto=dxfResumo(decodeText(ab));return out}
-  if(ext==="zip"){await need("zip");const z=await JSZip.loadAsync(ab);out.texto="Conteúdo do ZIP: "+Object.keys(z.files).slice(0,500).join(" ");return out}
-  if(/^(doc|ppt|msg)$/.test(ext)){out.texto=textoBinario(ab);return out}
-  let t=decodeText(ab);if(/^(html?|xml|eml)$/.test(ext))t=t.replace(/<(script|style)[\s\S]*?<\/\1>/gi," ").replace(/<[^>]+>/g," ");
+  if(ext==="zip"){await need("zip");const z=await JSZip.loadAsync(ab);const nomes=Object.keys(z.files).filter(n=>!z.files[n].dir);out.texto="Conteúdo do ZIP: "+nomes.slice(0,500).join(" ");
+    let lidos=0;for(const n of nomes){if(lidos>=40||out.texto.length>300000)break;const e=n.split(".").pop().toLowerCase(),tp=tipoDe(e);if(!["texto","tabela","dxf"].includes(tp)||e==="zip")continue;
+      try{const b=await z.file(n).async("blob");if(b.size>20e6)continue;const x=await extrairTexto(new File([b],n.split("/").pop()),e);if(x.texto){out.texto+=`\n[${n}] `+x.texto.slice(0,40000);lidos++}}catch(err){}}return out}
+  if(tipo==="zip"){const parte=file.size>4e6?await file.slice(0,4e6).arrayBuffer():ab;out.texto="Conteúdo do pacote: "+(textoBinario(parte)+" "+textoUTF16(parte)).split(" ").filter(w=>/\.[a-z0-9]{2,5}$/i.test(w)||w.length>5).slice(0,800).join(" ");return out}
+  if(/^(odt|ott|odp)$/.test(ext)){await need("zip");const z=await JSZip.loadAsync(ab);const x=await z.file("content.xml")?.async("string")||"";out.texto=x.replace(/<text:(p|h|line-break|tab)[^>]*\/?>/g,"\n").replace(/<[^>]+>/g," ").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&").replace(/[ \t]+/g," ");return out}
+  if(/^(docm|dotx)$/.test(ext)){await need("docx");out.texto=(await mammoth.extractRawText({arrayBuffer:ab})).value;return out}
+  if(/^(pptm|ppsx)$/.test(ext)){await need("zip");const z=await JSZip.loadAsync(ab);for(const f of Object.keys(z.files).filter(f=>/ppt\/slides\/slide\d+\.xml$/.test(f))){const x=await z.file(f).async("string");out.texto+=" "+(x.match(/<a:t>[^<]*<\/a:t>/g)||[]).map(s=>s.replace(/<\/?a:t>/g,"")).join(" ")}return out}
+  if(/^(doc|ppt|pps|msg)$/.test(ext)){out.texto=(textoBinario(ab)+" "+textoUTF16(ab)).slice(0,400000);return out}
+  if(!pareceTexto(ab)&&!/^(html?|xml|svg|json)$/.test(ext)){out.texto=(textoBinario(ab)+" "+textoUTF16(ab)).slice(0,200000);return out}
+  let t=decodeText(ab);if(/^(html?|xml|eml|svg|xaml)$/.test(ext))t=t.replace(/<(script|style)[\s\S]*?<\/\1>/gi," ").replace(/<[^>]+>/g," ");
   if(ext==="rtf")t=t.replace(/\\[a-z]+-?\d* ?|[{}]/g," ");out.texto=t;return out}
 
 /* ---------- exportações SAP e históricos em planilha viram eventos */
@@ -139,7 +154,7 @@ async function baseSincronizar(){if(typeof PERFIL==="undefined"||!PERFIL?.unidad
 /* ---------- indexação incremental */
 async function indexarUm(p,file,ext){const reg={p,n:file.name,e:ext,s:file.size,m:file.lastModified,k:tipoDe(ext),t:[],r:"",pg:0,ev:0};
   const nomeT=termosDe(p.replace(/[\/_]/g," "),24);
-  try{const x=await extrairTexto(file,ext);reg.k=x.k;reg.pg=x.pg;if(x.nota)reg.x=x.nota;
+  try{const x=await extrairTexto(file,ext);reg.k=x.k;reg.pg=x.pg;if(x.nota)reg.x=x.nota;if(x.pf)reg.pf=1;
     const limpo=x.texto.replace(/\[p\.\d+\]|\[slide \d+\]|\[aba [^\]]*\]/g," ").replace(/\s+/g," ").trim();
     reg.r=limpo.slice(0,420);reg.t=[...new Set([...nomeT,...termosDe(limpo,Math.min(220,40+Math.round(limpo.length/2500)))])];
     if(x.linhas){const evs=eventosDeTabela(x.linhas,file.name);if(evs.length){await enviarEventos(evs);reg.ev=evs.length;BASE.prog.eventos+=evs.length}}
@@ -188,13 +203,21 @@ async function textoDoArquivo(p){if(BASE.cache.has(p))return BASE.cache.get(p);i
 function trechosCom(texto,ts,n=3,larg=700){const low=normB(texto),hits=[];for(const t of ts){let i=low.indexOf(t),c=0;while(i>=0&&c<40){hits.push(i);i=low.indexOf(t,i+t.length);c++}}
   hits.sort((a,b)=>a-b);const jan=[];for(const h of hits){const ini=Math.max(0,h-larg/3);if(jan.length&&ini<jan.at(-1).fim)continue;const pedaco=low.slice(ini,ini+larg);jan.push({ini,h,fim:ini+larg,score:ts.filter(t=>pedaco.includes(t)).length})}
   return jan.sort((a,b)=>b.score-a.score).slice(0,n).map(j=>{const k=texto.lastIndexOf("[p.",j.h),pg=k>=0?parseInt(texto.slice(k+3,k+9)):NaN;return {pagina:isNaN(pg)?null:pg,texto:texto.slice(j.ini,j.fim).replace(/\s+/g," ").trim()}})}
+const TAG_RE=/^([a-z]{1,6})[-_.\/ ]?0*(\d{1,6})([a-z]?)$/;
+function variantesTermo(t){const out=new Set([t]);const m=t.match(TAG_RE);if(m){const [,a,n,x]=m;for(const sep of ["","-","_","."])for(const num of [n,n.padStart(2,"0"),n.padStart(3,"0")])out.add(a+sep+num+x)}
+  else if(t.length>4){if(t.endsWith("es"))out.add(t.slice(0,-2));if(t.endsWith("s"))out.add(t.slice(0,-1));else out.add(t+"s");if(t.endsWith("oes"))out.add(t.slice(0,-3)+"ao");if(t.endsWith("ao"))out.add(t.slice(0,-2)+"oes")}return [...out]}
+const compacto=s=>normB(s).replace(/[^a-z0-9]/g,"");
+async function todasChaves(){const n=await docsCount();if(BASE._chaves&&BASE._chaves.n===n)return BASE._chaves.l;const d=await idb();const l=await reqP(d.transaction("docs").objectStore("docs").getAllKeys());BASE._chaves={n,l,c:l.map(compacto)};return l}
 async function baseBuscar(consulta,limite=8){if(!(await docsCount().catch(()=>0)))return [];
-  const ts=[...new Set(termosDe(consulta,12))];if(!ts.length)return [];const pont=new Map();
-  for(const t of ts){const ks=await chavesPorTermo(t);for(const k of ks)pont.set(k,(pont.get(k)||0)+1)}
+  const q=String(consulta).replace(/\b([A-Za-z]{1,6})[\s\-_.]+(\d{1,5})\b/g,"$1-$2");
+  const ts=[...new Set(termosDe(q,12))];if(!ts.length)return [];const pont=new Map();
+  for(const t of ts){const vis=new Set();for(const v of variantesTermo(t)){for(const k of await chavesPorTermo(v))if(!vis.has(k)){vis.add(k);pont.set(k,(pont.get(k)||0)+1)}}
+    const m=t.match(TAG_RE);if(m){await todasChaves();const alvos=[...new Set([m[1]+m[2]+m[3],m[1]+m[2].padStart(2,"0")+m[3]])];BASE._chaves.c.forEach((c,i)=>{if(alvos.some(a=>new RegExp(a+"(?![0-9])").test(c))){const k=BASE._chaves.l[i];if(!vis.has(k)){vis.add(k);pont.set(k,(pont.get(k)||0)+1.5)}}})}
+    else if(vis.size<5&&t.length>=4){await todasChaves();const a=compacto(t);if(a.length>=4)BASE._chaves.c.forEach((c,i)=>{if(c.includes(a)){const k=BASE._chaves.l[i];if(!vis.has(k)){vis.add(k);pont.set(k,(pont.get(k)||0)+1.2)}}})}}
   const cand=[...pont.entries()].sort((a,b)=>b[1]-a[1]).slice(0,60);const docs=(await docsGet(cand.map(c=>c[0]))).filter(Boolean);
-  for(const d of docs){const nm=normB(d.p);d._s=pont.get(d.p)*2+ts.filter(t=>nm.includes(t)).length*3}
+  for(const d of docs){const nm=compacto(d.p);d._s=pont.get(d.p)*2+ts.filter(t=>variantesTermo(t).some(v=>nm.includes(compacto(v)))).length*3+(d.k==="digitalizado"||d.k==="cad"?0:.5)}
   docs.sort((a,b)=>b._s-a._s);const out=[];
-  for(const d of docs.slice(0,limite)){let tre=[];if(BASE.dir&&raizDe(d.p)===BASE.pasta&&!["imagem","video","cad","outro","digitalizado"].includes(d.k)){try{const tx=await textoDoArquivo(d.p);if(tx)tre=trechosCom(tx,ts,2)}catch(e){}}
+  for(const d of docs.slice(0,limite)){let tre=[];if(BASE.dir&&raizDe(d.p)===BASE.pasta&&!["imagem","video","audio","cad","outro","digitalizado","programa","zip","desenho"].includes(d.k)){try{const tx=await textoDoArquivo(d.p);if(tx)tre=trechosCom(tx,ts,2)}catch(e){}}
     if(tre.length)tre.forEach(x=>out.push({origem:"arquivo",caminho:d.p,nome:d.n,pagina:x.pagina,texto:x.texto,tipo:d.k}));
     else out.push({origem:"arquivo",caminho:d.p,nome:d.n,pagina:null,texto:d.r||`(${d.k}: só pelo nome)`,tipo:d.k})}
   return out}
