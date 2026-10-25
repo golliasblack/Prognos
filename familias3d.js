@@ -6,6 +6,7 @@
    ISO 2858/5199 para bombas e proporções usuais de redutores e pontes rolantes) e registra a suposição. */
 
 const FAM_INFO={
+  poco_concreto:"poço/canal/tanque enterrado de concreto armado lido de um desenho civil (parâmetros: comprimento, largura, altura_parede, cota_fundo, esp_parede, esp_fundo, eixos_mm = posições dos eixos de colunas ao longo do comprimento, col_secao, cota_topo_colunas, cota_plataforma, larg_plataforma, divisorias = [{pos,esp}], pisos_internos = [{cota,de,ate,esp}]). Use SÓ cotas do desenho (ler_desenho_cad)",
   motor_eletrico:"motor elétrico de indução IEC com pés: potencia_kw, polos, carcaca (altura do eixo em mm), d_eixo",
   bomba_centrifuga:"bomba centrífuga horizontal com motor e base: d_rotor, dn_succao, dn_recalque, potencia_kw, rpm, designacao (ex.: 250-400)",
   redutor:"redutor de engrenagens de eixos paralelos: estagios, relacao, torque_saida_knm ou potencia_kw+rpm_entrada, comprimento/largura/altura da carcaça, d_eixo_entrada, d_eixo_saida, distancias_centro [mm], massa_kg",
@@ -111,6 +112,25 @@ function conjuntoRodas(p,sup){const D=num(p.d_roda||p.diametro,630),tr=String(p.
   if(p.motriz!==false&&p.motriz!=="false"){const R=redutor({estagios:2,relacao:num(p.relacao,31.5),potencia_kw:num(p.potencia_kw,15),rpm_entrada:1750},sup);if(!p.potencia_kw)sup.push("motorredutor de translação estimado: 15 kW, relação 31,5");
     R.pecas.forEach(pc=>{pc.id="red_"+pc.id;pc.nome="Acionamento · "+pc.nome;const G=matrizG([0,yb+Bm+R.dados.carcaca_mm[1]/2+40,D/2-R.dados.altura_eixos_mm],0);pc.solidos.forEach(s=>s.G=G);(pc.vazios||[]).forEach(s=>s.G=G);pecas.push(pc)})}
   return {pecas,dados:{D,banda:b,flange:fl,boleto:bol,folga_lateral_por_lado:+((b-bol)/2).toFixed(1),eixo:d}}}
+function pocoConcreto(p,sup){const L=num(p.comprimento,16000),W=num(p.largura,4000),H=num(p.altura_parede,8000),zf=num(p.cota_fundo,-H),e=num(p.esp_parede,400),ef=num(p.esp_fundo,e);
+  if(!p.comprimento)sup.push(`comprimento ${L} mm (assumido)`);if(!p.largura)sup.push(`largura ${W} mm (assumida)`);if(!p.altura_parede)sup.push(`altura da parede ${H} mm (assumida)`);if(!p.esp_parede)sup.push(`parede ${e} mm (assumida)`);
+  const pecas=[{id:"lastro",nome:"Concreto magro (lastro)",disciplina:"civil",opacidade:.5,solidos:[bx(L+200,W+200,100,L/2,0,zf-100)]},
+   {id:"laje_fundo",nome:`Laje de fundo ${L}×${W}×${ef}`,disciplina:"civil",solidos:[bx(L,W,ef,L/2,0,zf)]},
+   {id:"paredes",nome:`Paredes perimetrais ${e} mm`,disciplina:"civil",opacidade:.55,solidos:[bx(L,e,H-ef,L/2,-(W/2-e/2),zf+ef),bx(L,e,H-ef,L/2,W/2-e/2,zf+ef),bx(e,W-2*e,H-ef,e/2,0,zf+ef),bx(e,W-2*e,H-ef,L-e/2,0,zf+ef)]}];
+  const zt=zf+H;
+  if(Array.isArray(p.corte)&&p.corte.length){const cx=p.corte.filter(c=>c&&isFinite(c.x0)&&isFinite(c.x1)&&isFinite(c.z0)&&isFinite(c.z1)&&c.x1>c.x0&&c.z1>c.z0),Wi=W-2*e;
+    const par=cx.filter(c=>c.t!=="laje"),laj=cx.filter(c=>c.t==="laje");
+    pecas[2]={id:"paredes",nome:`Paredes laterais ${e} mm (corte transversal)`,disciplina:"civil",opacidade:.45,solidos:[bx(L,e,H-ef,L/2,-(W/2-e/2),zf+ef),bx(L,e,H-ef,L/2,W/2-e/2,zf+ef)]};
+    if(par.length)pecas.push({id:"paredes_corte",nome:`Paredes lidas do corte longitudinal (${par.length})`,disciplina:"civil",opacidade:.7,solidos:par.map(c=>bx(c.x1-c.x0,Wi,c.z1-c.z0,(c.x0+c.x1)/2,0,c.z0))});
+    if(laj.length)pecas.push({id:"lajes_corte",nome:`Lajes lidas do corte longitudinal (${laj.length})`,disciplina:"civil",opacidade:.7,solidos:laj.map(c=>bx(c.x1-c.x0,Wi,c.z1-c.z0,(c.x0+c.x1)/2,0,c.z0))});
+    return {pecas,dados:{comprimento:L,largura:W,altura_parede:H,cota_fundo:zf,cota_topo_parede:zt,esp_parede:e,paredes_e_lajes_do_corte:cx.length}}}
+  const dv=(p.divisorias||[]).filter(d=>d&&d.pos>0&&d.pos<L);if(dv.length)pecas.push({id:"divisorias",nome:"Paredes divisórias",disciplina:"civil",opacidade:.55,solidos:dv.map(d=>bx(num(d.esp,e),W-2*e,H-ef,num(d.pos,0),0,zf+ef))});
+  const pi=(p.pisos_internos||[]).filter(d=>d&&d.cota!=null);if(pi.length)pecas.push({id:"pisos_internos",nome:"Pisos/lajes internas",disciplina:"civil",solidos:pi.map(d=>{const a=num(d.de,e),b=num(d.ate,L-e),t=num(d.esp,200);return bx(b-a,W-2*e,t,(a+b)/2,0,num(d.cota,0)-t)})});
+  const eixos=(p.eixos_mm||[]).map(Number).filter(v=>isFinite(v)),cs=num(p.col_secao,e),ct=p.cota_topo_colunas!=null?num(p.cota_topo_colunas,zt):null;
+  if(eixos.length&&ct!=null&&ct>zt){const x0=num(p.eixo_origem,0);pecas.push({id:"colunas",nome:`Colunas ${cs}×${cs} nos eixos (${eixos.length} eixos × 2)`,disciplina:"estrutura",solidos:eixos.flatMap(x=>[-1,1].map(l=>bx(cs,cs,ct-zt,x0+x,l*(W/2-e/2),zt)))})}
+  else if(eixos.length)sup.push("eixos informados, mas sem cota do topo das colunas: colunas não modeladas");
+  if(p.cota_plataforma!=null&&p.larg_plataforma){const lp=num(p.larg_plataforma,1000),zp=num(p.cota_plataforma,0);pecas.push({id:"plataforma",nome:`Plataforma na cota +${zp}`,disciplina:"estrutura",solidos:[bx(L-2*e,lp,60,L/2,-(W/2-e-lp/2),zp-60)]})}
+  return {pecas,dados:{comprimento:L,largura:W,altura_parede:H,cota_fundo:zf,cota_topo_parede:zt,esp_parede:e,esp_fundo:ef,colunas:eixos.length*2||0,volume_concreto_m3:+((L*W*ef+2*L*e*(H-ef)+2*e*(W-2*e)*(H-ef))/1e9).toFixed(1)}}}
 function tanque(p){const D=num(p.diametro,3000),H=num(p.altura,4000);const pecas=[{id:"tanque",nome:`Tanque Ø${D}×${H}`,disciplina:"processo",opacidade:.6,solidos:[czS(D,H,0,0,p.com_pernas===false?0:800),{forma:"cone",d1:D,d2:D*.15,h:D*.18,pos:[0,0,(p.com_pernas===false?0:800)+H]}]}];
   if(p.com_pernas!==false)pecas.push({id:"pernas",nome:"Pernas",disciplina:"estrutura",solidos:[0,90,180,270].map(a=>bx(150,150,800,Math.cos(a*Math.PI/180)*D*.42,Math.sin(a*Math.PI/180)*D*.42,0))});return {pecas,dados:{D,H}}}
 function painel(p){const n=Math.round(num(p.colunas,4)),w=num(p.largura_coluna,800),h=num(p.altura,2200),pr=num(p.profundidade,600);
@@ -128,7 +148,7 @@ function tubovia(p){const C=num(p.comprimento,24000),W=num(p.largura,4000),nv=Ma
 function ventilador(p,sup){const d=num(p.d_rotor,900),kw=num(p.potencia_kw,Math.round(Math.pow(d/600,3)*15));const M=motorEletrico({potencia_kw:kw},sup),Dv=d*1.5,Hs=Math.max(Dv*.6,M.H+60);
   const pecas=[{id:"voluta",nome:`Voluta Ø${Math.round(Dv)}`,disciplina:"processo",opacidade:.5,solidos:[cxS(Dv,d*.5,0,0,Hs),cxS(d*.8,d*.4,-d*.4,0,Hs),{forma:"caixa",w:d*.5,p:Dv*.45,h:Dv*.75,pos:[d*.25,Dv*.28,Hs]}]},{id:"rotor",nome:`Rotor Ø${d}`,disciplina:"processo",solidos:[cxS(d,d*.3,d*.1,0,Hs)]}];
   const xm=d*.5+M.comprimento+400;M.pecas.forEach(pc=>{pc.id="vent_"+pc.id;pc.solidos.forEach(s=>s.G=matrizG([xm,0,Hs-M.H],0));pecas.push(pc)});return {pecas,dados:{d,kw}}}
-const FAMILIAS={conjunto_rodas:conjuntoRodas,motor_eletrico:(p,s)=>{const m=motorEletrico(p,s);return {pecas:m.pecas,dados:{carcaca:m.H,eixo:m.D}}},bomba_centrifuga:bombaCentrifuga,redutor,ponte_rolante:pontoRolante,mancal:mancalSNL,tanque,painel,transportador_correia:transportador,estrutura_portico:portico,tubovia,ventilador_centrifugo:ventilador};
+const FAMILIAS={poco_concreto:pocoConcreto,conjunto_rodas:conjuntoRodas,motor_eletrico:(p,s)=>{const m=motorEletrico(p,s);return {pecas:m.pecas,dados:{carcaca:m.H,eixo:m.D}}},bomba_centrifuga:bombaCentrifuga,redutor,ponte_rolante:pontoRolante,mancal:mancalSNL,tanque,painel,transportador_correia:transportador,estrutura_portico:portico,tubovia,ventilador_centrifugo:ventilador};
 
 /* matriz de posição de um equipamento: translação e giro em torno de z (graus) */
 function matrizG(pos=[0,0,0],rotz=0){const a=(rotz||0)*Math.PI/180,c=Math.cos(a),s=Math.sin(a),[x,y,z]=pos.map(v=>+v||0);return [c,s,0,0,-s,c,0,0,0,0,1,0,x,y,z,1]}

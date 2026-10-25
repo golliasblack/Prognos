@@ -10,8 +10,9 @@ let DWGW=null,dwgSeq=0;const dwgPend=new Map();
 function dwgWorker(){if(DWGW)return DWGW;DWGW=new Worker("vendor/dwg-worker.js",{type:"module"});
   DWGW.onmessage=e=>{const p=dwgPend.get(e.data.id);if(p){dwgPend.delete(e.data.id);clearTimeout(p.t);e.data.ok?p.res(e.data.texto):p.rej(new Error(e.data.erro))}};
   DWGW.onerror=e=>{for(const [,p] of dwgPend){clearTimeout(p.t);p.rej(new Error(e.message||"falha no leitor DWG"))}dwgPend.clear();DWGW?.terminate();DWGW=null};return DWGW}
-function dwgTexto(ab){return new Promise((res,rej)=>{const id=++dwgSeq,w=dwgWorker();const t=setTimeout(()=>{dwgPend.delete(id);DWGW?.terminate();DWGW=null;rej(new Error("DWG demorou demais"))},90000);
-  dwgPend.set(id,{res,rej,t});w.postMessage({id,buf:ab},[ab])})}
+function dwgTexto(ab,modo){return new Promise((res,rej)=>{const id=++dwgSeq,w=dwgWorker();const t=setTimeout(()=>{dwgPend.delete(id);DWGW?.terminate();DWGW=null;rej(new Error("DWG demorou demais"))},90000);
+  dwgPend.set(id,{res,rej,t});w.postMessage({id,buf:ab,modo},[ab])})}
+async function dwgGeo(file){const ab=await file.arrayBuffer(),cab=new TextDecoder("latin1").decode(new Uint8Array(ab,0,6));if(!/^AC10(1[89]|2\d|3\d)$/.test(cab))throw new Error("DWG "+(DWG_VERSAO[cab]||cab)+" é antigo demais para ler as cotas; salve como DWG 2004+ ou DXF");return JSON.parse(await dwgTexto(ab,"geo"))}
 /* versões antigas (R2000 e anteriores, AC1015-) travam o LibreDWG em WebAssembly; nelas o texto não é compactado, então a varredura binária lê bem */
 const DWG_VERSAO={AC1009:"R12",AC1012:"R13",AC1014:"R14",AC1015:"R2000",AC1018:"R2004",AC1021:"R2007",AC1024:"R2010",AC1027:"R2013",AC1032:"R2018"};
 async function lerDWG(file){const ab=await file.arrayBuffer(),cab=new TextDecoder("latin1").decode(new Uint8Array(ab,0,6)),ver=DWG_VERSAO[cab]||cab;
