@@ -16,6 +16,7 @@ const FAM_INFO={
   transportador_correia:"transportador de correia com acionamento: comprimento, largura_correia, altura, potencia_kw",
   estrutura_portico:"estrutura em pórticos de perfis: vao, altura, comprimento, n_porticos, perfil_altura",
   tubovia:"tubovia (pipe rack) com tubos: comprimento, largura, niveis, altura_primeiro_nivel, tubos (lista de DN em mm)",
+  conjunto_rodas:"conjunto de rodas de ponte rolante sobre trilho (roda com flanges, eixo, 2 mancais, trilho e viga de rolamento; motriz leva redutor): d_roda (Ø mm), largura_banda, d_eixo, trilho (ex.: TR57 ou perfil A75), largura_boleto, motriz (true/false), vao_viga_mm, folga_flange",
   ventilador_centrifugo:"ventilador centrífugo com motor: d_rotor, potencia_kw, rpm"};
 const num=(v,d)=>{const n=+String(v??"").replace(",",".");return isFinite(n)&&n>0?n:d};
 const r5=x=>Math.ceil(x/5)*5;
@@ -96,6 +97,20 @@ function pontoRolante(p,sup){const cap=num(p.capacidade_t,50),vao=num(p.vao_m,22
 function mancalSNL(p,sup){const d=num(p.d_eixo,80),De=num(p.d_rolamento_ext,r5(d*1.8+20)),B=num(p.largura,Math.round(d*.45)),H=Math.round(De*.72+20);
   return {pecas:[{id:"caixa",nome:`Mancal bipartido eixo Ø${d}`,disciplina:"mecanica",opacidade:.55,solidos:[bx(De*2.4,B*1.9,H*.55,0,0,0),cyS(De*1.35,B*1.9,0,-B*.95,H)],vazios:[cyS(De,B*2,0,-B,H)]},
     {id:"rolamento",nome:`Rolamento Ø${d}×Ø${De}`,disciplina:"mecanica",solidos:[tbY(De,d,B,0,-B/2,H)]},{id:"eixo",nome:`Eixo Ø${d}`,disciplina:"mecanica",solidos:[cyS(d,B*6,0,-B*3,H)]}],dados:{d,De,B,altura_centro:H}}}
+function conjuntoRodas(p,sup){const D=num(p.d_roda||p.diametro,630),tr=String(p.trilho||"TR57").toUpperCase();
+  const cat={TR57:[100,140,168],TR68:[108,150,185],A75:[75,95,65],A100:[100,120,75],A120:[120,138,85]};const ref=cat[tr.replace(/[^A-Z0-9]/g,"")]||cat.TR57;if(!p.trilho||!cat[tr.replace(/[^A-Z0-9]/g,"")])sup.push(`trilho ${tr} ${cat[tr.replace(/[^A-Z0-9]/g,"")]?"":"não catalogado; usado perfil de "}boleto ${ref[0]} mm`);
+  const bol=num(p.largura_boleto,ref[0]);if(!p.largura_boleto&&!p.trilho)sup.push(`boleto do trilho ${bol} mm`);
+  const b=num(p.largura_banda,r5(bol+40)),fl=num(p.altura_flange,28),gap=num(p.folga_flange,(b-bol)/2),d=num(p.d_eixo,r5(D*.22));if(!p.d_roda&&!p.diametro)sup.push(`roda Ø${D} mm (assumida)`);if(!p.largura_banda)sup.push(`banda de rodagem ${b} mm`);if(!p.d_eixo)sup.push(`eixo Ø${d} mm pelo diâmetro da roda`);
+  const vao=num(p.vao_viga_mm,b+900),hv=num(p.altura_viga,400),hb=ref[1],hr=hb*0+ref[2];const L=Math.max(3*D,2500),fb=Math.round(fl*.9);
+  const pecas=[{id:"roda",nome:`Roda Ø${D} banda ${b}`,disciplina:"mecanica",solidos:[cyS(D,b,0,-b/2,D/2),cyS(D+2*fl,22,0,-b/2-22,D/2),cyS(D+2*fl,22,0,b/2,D/2)]},
+    {id:"eixo",nome:`Eixo Ø${d}`,disciplina:"mecanica",solidos:[cyS(d,b+vao*0+Math.round(D*1.1),0,-(b+Math.round(D*1.1))/2,D/2)]}];
+  const yb=b/2+22+Math.round(D*.12),Hm=Math.round(d*1.4),Bm=Math.round(d*.9);
+  for(const lado of [-1,1])pecas.push({id:"mancal"+(lado<0?"_esq":"_dir"),nome:`Mancal ${lado<0?"esquerdo":"direito"} eixo Ø${d}`,disciplina:"mecanica",opacidade:.6,solidos:[bx(Math.round(d*2.4),Bm,Math.round(d*2),0,lado*(yb+Bm/2)-Bm/2*0,D/2-d*1.0),bx(Math.round(d*2.9),Bm,Math.round(d*.35),0,lado*(yb+Bm/2),D/2-d*1.0-d*.35)],vazios:[cyS(d,Bm+4,0,lado*(yb+Bm/2)-Bm/2-2,D/2)]});
+  pecas.push({id:"trilho",nome:`Trilho ${tr}`,disciplina:"estrutura",solidos:[bx(L,bol,Math.round(hr*.35),0,0,-Math.round(hr*.35)),bx(L,Math.round(bol*.35),Math.round(hr*.4),0,0,-Math.round(hr*.75)),bx(L,Math.round(bol*1.4),Math.round(hr*.25),0,0,-hr)]});
+  pecas.push({id:"viga",nome:"Viga de rolamento",disciplina:"civil",solidos:[bx(L,Math.round(Math.max(vao*.45,300)),hv,0,0,-hr-hv)]});
+  if(p.motriz!==false&&p.motriz!=="false"){const R=redutor({estagios:2,relacao:num(p.relacao,31.5),potencia_kw:num(p.potencia_kw,15),rpm_entrada:1750},sup);if(!p.potencia_kw)sup.push("motorredutor de translação estimado: 15 kW, relação 31,5");
+    R.pecas.forEach(pc=>{pc.id="red_"+pc.id;pc.nome="Acionamento · "+pc.nome;const G=matrizG([0,yb+Bm+R.dados.carcaca_mm[1]/2+40,D/2-R.dados.altura_eixos_mm],0);pc.solidos.forEach(s=>s.G=G);(pc.vazios||[]).forEach(s=>s.G=G);pecas.push(pc)})}
+  return {pecas,dados:{D,banda:b,flange:fl,boleto:bol,folga_lateral_por_lado:+((b-bol)/2).toFixed(1),eixo:d}}}
 function tanque(p){const D=num(p.diametro,3000),H=num(p.altura,4000);const pecas=[{id:"tanque",nome:`Tanque Ø${D}×${H}`,disciplina:"processo",opacidade:.6,solidos:[czS(D,H,0,0,p.com_pernas===false?0:800),{forma:"cone",d1:D,d2:D*.15,h:D*.18,pos:[0,0,(p.com_pernas===false?0:800)+H]}]}];
   if(p.com_pernas!==false)pecas.push({id:"pernas",nome:"Pernas",disciplina:"estrutura",solidos:[0,90,180,270].map(a=>bx(150,150,800,Math.cos(a*Math.PI/180)*D*.42,Math.sin(a*Math.PI/180)*D*.42,0))});return {pecas,dados:{D,H}}}
 function painel(p){const n=Math.round(num(p.colunas,4)),w=num(p.largura_coluna,800),h=num(p.altura,2200),pr=num(p.profundidade,600);
@@ -113,7 +128,7 @@ function tubovia(p){const C=num(p.comprimento,24000),W=num(p.largura,4000),nv=Ma
 function ventilador(p,sup){const d=num(p.d_rotor,900),kw=num(p.potencia_kw,Math.round(Math.pow(d/600,3)*15));const M=motorEletrico({potencia_kw:kw},sup),Dv=d*1.5,Hs=Math.max(Dv*.6,M.H+60);
   const pecas=[{id:"voluta",nome:`Voluta Ø${Math.round(Dv)}`,disciplina:"processo",opacidade:.5,solidos:[cxS(Dv,d*.5,0,0,Hs),cxS(d*.8,d*.4,-d*.4,0,Hs),{forma:"caixa",w:d*.5,p:Dv*.45,h:Dv*.75,pos:[d*.25,Dv*.28,Hs]}]},{id:"rotor",nome:`Rotor Ø${d}`,disciplina:"processo",solidos:[cxS(d,d*.3,d*.1,0,Hs)]}];
   const xm=d*.5+M.comprimento+400;M.pecas.forEach(pc=>{pc.id="vent_"+pc.id;pc.solidos.forEach(s=>s.G=matrizG([xm,0,Hs-M.H],0));pecas.push(pc)});return {pecas,dados:{d,kw}}}
-const FAMILIAS={motor_eletrico:(p,s)=>{const m=motorEletrico(p,s);return {pecas:m.pecas,dados:{carcaca:m.H,eixo:m.D}}},bomba_centrifuga:bombaCentrifuga,redutor,ponte_rolante:pontoRolante,mancal:mancalSNL,tanque,painel,transportador_correia:transportador,estrutura_portico:portico,tubovia,ventilador_centrifugo:ventilador};
+const FAMILIAS={conjunto_rodas:conjuntoRodas,motor_eletrico:(p,s)=>{const m=motorEletrico(p,s);return {pecas:m.pecas,dados:{carcaca:m.H,eixo:m.D}}},bomba_centrifuga:bombaCentrifuga,redutor,ponte_rolante:pontoRolante,mancal:mancalSNL,tanque,painel,transportador_correia:transportador,estrutura_portico:portico,tubovia,ventilador_centrifugo:ventilador};
 
 /* matriz de posição de um equipamento: translação e giro em torno de z (graus) */
 function matrizG(pos=[0,0,0],rotz=0){const a=(rotz||0)*Math.PI/180,c=Math.cos(a),s=Math.sin(a),[x,y,z]=pos.map(v=>+v||0);return [c,s,0,0,-s,c,0,0,0,0,1,0,x,y,z,1]}
