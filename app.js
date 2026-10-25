@@ -341,7 +341,11 @@ const SPECS=[
 async function runTool(name,input,ui){
   if(name==="buscar_base"){const q=orQuery(input.consulta);if(!q)return {resultado:"consulta vazia"};const lim=Math.min(15,+input.limite||8);
     const [loc,nuv]=await Promise.all([baseBuscar(input.consulta,lim).catch(()=>[]),rpc("buscar",{q,limite:lim}).catch(()=>[])]);const rows=[...loc,...nuv];
-    ui.card("fontes",{consulta:input.consulta,itens:rows.slice(0,25)});return {encontrados:rows.length,itens:rows.slice(0,30).map(r=>({origem:r.origem,arquivo:r.caminho,pagina:r.pagina,data:r.data,tipo:r.tipo_evento,equipamento:r.equipamento,texto:r.texto}))}}
+    ui.card("fontes",{consulta:input.consulta,itens:rows.slice(0,25)});
+    /* resposta enxuta para a IA: as IAs grátis têm contexto curto */
+    const vistos=new Set(),itens=[];for(const r of rows){const k=(r.caminho||"")+"|"+(r.pagina||"");if(vistos.has(k))continue;vistos.add(k);const soNome=/só pelo nome/.test(r.texto||"");
+      itens.push({arquivo:r.caminho,pagina:r.pagina||undefined,data:r.data||undefined,tipo:r.tipo_evento||r.tipo||undefined,equipamento:r.equipamento||undefined,texto:soNome?"(conteúdo ainda não lido; só o nome do arquivo)":String(r.texto||"").replace(/(\|\s*){2,}/g,"| ").replace(/\s+/g," ").slice(0,260)});if(itens.length>=12)break}
+    return {encontrados:rows.length,itens,dica:itens.length?"Use estes resultados. Se precisar, leia UM arquivo com ler_arquivo_base; não repita a mesma busca.":"Nada encontrado: tente outra grafia uma vez e depois responda com o que sabe."}}
   if(name==="ler_arquivo_base"){const r=await baseLerArquivo(input.caminho,{procurar:input.procurar,inicio:+input.inicio||0});ui.step(`Lido: ${input.caminho}`);return r}
   if(name==="historico_equipamento"){const q=String(input.equipamento||"").replace(/[^\p{L}\p{N}\s_-]/gu," ").trim().split(/\s+/).filter(w=>w.length>=2).join(" ");
     const rows=await sb(`eventos?select=data,tipo_evento,equipamento,componente,modo,texto,fonte&tsv=wfts(portuguese).${encodeURIComponent(q)}&order=data.asc.nullslast&limit=400`);
@@ -473,16 +477,23 @@ async function send(){if(busy){ctl?.abort();return}const text=$("inp").value.tri
   let curText=null,curEl=null;const scroll=()=>{const th=$("thread");if(th.scrollHeight-th.scrollTop-th.clientHeight<240)th.scrollTop=1e9};
   const ui={card:(k,v)=>{amsg.parts.push({t:"card",k,v});const el=CARDS[k](v);wrap.append(el);curEl=null;scroll();return el},step:t=>{amsg.parts.push({t:"step",v:t});const d=document.createElement("div");d.className="step";d.textContent=t;wrap.append(d);curEl=null;scroll()}};
   busy=true;setBusy(true);ctl=new AbortController();
-  let pular=[],vazias=0;
-  try{for(let turn=0;turn<14;turn++){curText={t:"text",v:""};curEl=document.createElement("div");curEl.className="md";wrap.append(curEl);const myEl=curEl,myPart=curText;let shown=false;
+  let pular=[],vazias=0,rodadas=0,forcar=false,deuTexto=false;const feitas=new Map();
+  /* encolhe resultados antigos de ferramentas: mantém o contexto pequeno para as IAs grátis */
+  const enxugar=()=>{const idx=CONV.api.map((m,i)=>m.role==="user"&&Array.isArray(m.content)&&m.content.some(b=>b.type==="tool_result")?i:-1).filter(i=>i>=0);
+    for(const i of idx.slice(0,-1))CONV.api[i].content=CONV.api[i].content.map(b=>b.type==="tool_result"&&typeof b.content==="string"&&b.content.length>900?{...b,content:b.content.slice(0,900)+"…(resumido)"}:b)};
+  const FINAL="Pare de usar ferramentas agora. Responda ao usuário com o que já encontrou: o que achou (com os caminhos dos arquivos), o que ainda falta e o próximo passo prático. Se o pedido era um modelo 3D, monte com as dimensões que tiver e diga quais estimou.";
+  try{for(let turn=0;turn<16;turn++){curText={t:"text",v:""};curEl=document.createElement("div");curEl.className="md";wrap.append(curEl);const myEl=curEl,myPart=curText;let shown=false;
       if(typeof assistPoda==="function")assistPoda(CONV.api);
-      const res=await iaStream({tier:$("tier").value,system:systemPrompt(),tools:ferramentasDoPedido(),max_tokens:8000,messages:CONV.api,pular},{signal:ctl.signal,onText:t=>{myPart.v=t;myEl.innerHTML=md(t);if(!shown){amsg.parts.push(myPart);shown=true}scroll()}});
+      enxugar();if(rodadas>=6&&!forcar){forcar=true;const ult=CONV.api[CONV.api.length-1];if(ult?.role==="user"&&Array.isArray(ult.content))ult.content.push({type:"text",text:FINAL});ui.step("Juntando o que foi encontrado…")}
+      const res=await iaStream({tier:$("tier").value,system:systemPrompt(),tools:ferramentasDoPedido(),sem_ferramentas:forcar||undefined,max_tokens:8000,messages:CONV.api,pular},{signal:ctl.signal,onText:t=>{myPart.v=t;myEl.innerHTML=md(t);if(!shown){amsg.parts.push(myPart);shown=true}scroll()}});
       if(!shown&&!myPart.v)myEl.remove();if(res.prov?.provedor){amsg.prov=res.prov;lastProv=res.prov}
       /* resposta vazia (sem texto e sem ferramenta): tenta de novo em outra IA */
       if(!res.content.some(b=>(b.type==="text"&&b.text.trim())||b.type==="tool_use")&&vazias<2){vazias++;if(res.prov?.provedor)pular.push(res.prov.provedor);ui.step(`A IA ${res.prov?.provedor||""} não respondeu; tentando outra…`);continue}
       CONV.api.push({role:"assistant",content:res.content.length?res.content:[{type:"text",text:"(sem resposta)"}]});
-      const calls=res.content.filter(b=>b.type==="tool_use");if(res.stop!=="tool_use"||!calls.length)break;
-      const results=[];for(const c of calls){const st=document.createElement("div");st.className="step run";st.textContent=(TOOL_LABEL[c.name]||c.name)+"…";wrap.append(st);scroll();
+      if(res.content.some(b=>b.type==="text"&&b.text.trim().length>20))deuTexto=true;
+      const calls=res.content.filter(b=>b.type==="tool_use");if(res.stop!=="tool_use"||!calls.length||forcar){if(!deuTexto&&!forcar){forcar=true;CONV.api.push({role:"user",content:[{type:"text",text:FINAL}]});continue}break}
+      rodadas++;const results=[];for(const c of calls){const chave=c.name+"|"+JSON.stringify(c.input||{}).toLowerCase();
+        if(feitas.has(chave)){results.push({type:"tool_result",tool_use_id:c.id,content:JSON.stringify({aviso:"Esta mesma chamada já foi feita nesta resposta. Use o resultado anterior e responda ao usuário."})});rodadas++;continue}feitas.set(chave,1);const st=document.createElement("div");st.className="step run";st.textContent=(TOOL_LABEL[c.name]||c.name)+"…";wrap.append(st);scroll();
         try{const out=await runTool(c.name,c.input||{},ui);results.push({type:"tool_result",tool_use_id:c.id,content:JSON.stringify(out).slice(0,60000)});st.classList.remove("run");st.textContent=TOOL_LABEL[c.name]||c.name}
         catch(e){results.push({type:"tool_result",tool_use_id:c.id,is_error:true,content:String(e.message||e).slice(0,1000)});st.classList.remove("run");st.textContent=(TOOL_LABEL[c.name]||c.name)+": "+(e.message||"falhou").slice(0,120)}}
       CONV.api.push({role:"user",content:results})}}

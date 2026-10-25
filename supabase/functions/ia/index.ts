@@ -45,6 +45,21 @@ function provedoresAtivos(): Prov[] {
   }).filter((p: any) => p.chave && p.ok);
 }
 
+// Modelo substituto descoberto em tempo de execução, quando o padrão some do provedor.
+const substituto = new Map<string, { normal: string; rapido: string }>();
+const PREFERE = [/gpt-oss-120b/i, /gemini-[\d.]+-flash(?!-lite)(?!.*(image|tts|audio|live|thinking-exp))/i, /llama-?3\.3-70b/i, /qwen3?.*(235b|80b|72b|32b)/i, /deepseek-v3/i, /mistral-(medium|large)/i, /llama.*70b/i, /gpt-4\.1(?!-nano)/i];
+const PREFERE_RAPIDO = [/gpt-oss-20b/i, /gemini-[\d.]+-flash-lite/i, /llama-?3\.1-8b/i, /mistral-small/i, /gpt-4\.1-mini/i];
+async function trocaModelo(p: any, falhou: string) {
+  const r = await fetch(`${p.base}/models`, { headers: p.chave !== "-" ? { Authorization: `Bearer ${p.chave}` } : {} });
+  if (!r.ok) return;
+  const j: any = await r.json();
+  const ids: string[] = (j.data ?? j.models ?? []).map((m: any) => String(m.id ?? m.name ?? "").replace(/^models\//, "")).filter((x: string) => x && x !== falhou && !/embed|whisper|tts|image|vision-only|guard|rerank/i.test(x));
+  const acha = (lista: RegExp[]) => { for (const re of lista) { const m = ids.find((x) => re.test(x)); if (m) return m; } return ""; };
+  const normal = acha(PREFERE) || ids[0]; if (!normal) return;
+  substituto.set(p.id, { normal, rapido: acha(PREFERE_RAPIDO) || normal });
+  console.log(JSON.stringify({ ev: "ia_modelo_trocado", provedor: p.id, de: falhou, para: normal }));
+}
+
 // Pausa temporária de provedor que estourou cota (por instância da função).
 const pausa = new Map<string, number>();
 const pausado = (id: string) => (pausa.get(id) ?? 0) > Date.now();
@@ -101,7 +116,10 @@ function paraOpenAI(b: any, modelo: string, stream: boolean) {
   }
   const out: any = { model: modelo, messages: msgs, max_tokens: Math.min(Math.max(+b.max_tokens || 8000, 256), 16000), stream };
   if (stream) out.stream_options = { include_usage: true };
-  if (Array.isArray(b.tools) && b.tools.length) out.tools = b.tools.map((t: any) => ({ type: "function", function: { name: t.name, description: t.description ?? "", parameters: limpaSchema(t.input_schema ?? { type: "object" }) } }));
+  if (Array.isArray(b.tools) && b.tools.length) {
+    out.tools = b.tools.map((t: any) => ({ type: "function", function: { name: t.name, description: t.description ?? "", parameters: limpaSchema(t.input_schema ?? { type: "object" }) } }));
+    if (b.sem_ferramentas) out.tool_choice = "none";
+  }
   return out;
 }
 const PARADA: Record<string, string> = { stop: "end_turn", tool_calls: "tool_use", length: "max_tokens", function_call: "tool_use", content_filter: "refusal" };
@@ -209,23 +227,27 @@ Deno.serve(async (req) => {
   for (const p of fila) {
     const modelo = p.tipo === "anthropic"
       ? ({ quick: env("MODELO_ANTHROPIC_RAPIDO") || "claude-haiku-5-5", complex: env("MODELO_ANTHROPIC_PROFUNDO") || "claude-opus-5-5" } as any)[b.tier] ?? p.modelo
+      : substituto.has(p.id) ? (rapido ? substituto.get(p.id)!.rapido : substituto.get(p.id)!.normal)
       : (rapido && p.modeloRapido) ? p.modeloRapido : p.modelo;
-    const t0 = Date.now(), ctl = new AbortController(), limite = setTimeout(() => ctl.abort(), 45000);
+    const t0 = Date.now(), ctl = new AbortController(), limiteT = setTimeout(() => ctl.abort(), 45000);
     try {
       let r: Response;
       if (p.tipo === "anthropic") {
         const payload: any = { model: modelo, max_tokens: Math.min(Math.max(+b.max_tokens || 8000, 256), 32000), messages: b.messages, stream };
         if (b.system) payload.system = b.system;
-        if (Array.isArray(b.tools) && b.tools.length) payload.tools = b.tools;
+        if (Array.isArray(b.tools) && b.tools.length) { payload.tools = b.tools; if (b.sem_ferramentas) payload.tool_choice = { type: "none" }; }
         r = await fetch(`${p.base}/messages`, { method: "POST", signal: ctl.signal, headers: { "x-api-key": p.chave, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(payload) });
       } else {
         r = await fetch(`${p.base}/chat/completions`, { method: "POST", signal: ctl.signal, headers: { ...(p.chave !== "-" ? { Authorization: `Bearer ${p.chave}` } : {}), "Content-Type": "application/json", ...(p.extra ?? {}) }, body: JSON.stringify(paraOpenAI(b, modelo, stream)) });
       }
-      clearTimeout(limite);
+      clearTimeout(limiteT);
       console.log(JSON.stringify({ ev: "ia", provedor: p.id, modelo, status: r.status, ms: Date.now() - t0, stream, tools: (b.tools || []).length }));
       if (!r.ok) {
         const t = (await r.text()).slice(0, 300);
+        console.log(JSON.stringify({ ev: "ia_falha", provedor: p.id, modelo, status: r.status, corpo: t.slice(0, 200) }));
         erros.push(`${p.nome} ${r.status}: ${t}`);
+        // modelo retirado ou renomeado pelo provedor: descobre outro na lista do próprio provedor e usa nas próximas chamadas
+        if ((r.status === 404 || r.status === 410 || (r.status === 400 && /model/i.test(t))) && p.tipo === "openai") { pausa.set(p.id, Date.now() + 20_000); await trocaModelo(p, modelo).then(() => { if (substituto.has(p.id)) pausa.delete(p.id); }).catch(() => {}); }
         if (r.status === 429 || r.status === 402) pausa.set(p.id, Date.now() + (Number(r.headers.get("retry-after")) * 1000 || 60_000));
         else if (r.status === 401 || r.status === 403) pausa.set(p.id, Date.now() + 10 * 60_000);
         continue; // próximo provedor
@@ -235,7 +257,7 @@ Deno.serve(async (req) => {
       if (stream) return new Response(streamAnthropic(r.body!, modelo), { status: 200, headers: { ...h, "Content-Type": "text/event-stream" } });
       return new Response(JSON.stringify(respostaAnthropic(await r.json(), modelo)), { status: 200, headers: { ...h, "Content-Type": "application/json" } });
     } catch (e) {
-      clearTimeout(limite); console.log(JSON.stringify({ ev: "ia_erro", provedor: p.id, ms: Date.now() - t0, erro: String(e).slice(0, 200) }));
+      clearTimeout(limiteT); console.log(JSON.stringify({ ev: "ia_erro", provedor: p.id, ms: Date.now() - t0, erro: String(e).slice(0, 200) }));
       if (String(e).includes("abort")) pausa.set(p.id, Date.now() + 120_000);
       erros.push(`${p.nome}: ${String(e).slice(0, 200)}`);
     }
