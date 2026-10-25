@@ -224,7 +224,9 @@ Deno.serve(async (req) => {
   if (Array.isArray(b.pular) && b.pular.length) { const sem = fila.filter((p) => !b.pular.includes(p.nome) && !b.pular.includes(p.id)); if (sem.length) fila = sem; }
 
   const erros: string[] = [];
-  for (const p of fila) {
+  const refeitos = new Set<string>();
+  for (let i = 0; i < fila.length; i++) {
+    const p = fila[i];
     const modelo = p.tipo === "anthropic"
       ? ({ quick: env("MODELO_ANTHROPIC_RAPIDO") || "claude-haiku-5-5", complex: env("MODELO_ANTHROPIC_PROFUNDO") || "claude-opus-5-5" } as any)[b.tier] ?? p.modelo
       : substituto.has(p.id) ? (rapido ? substituto.get(p.id)!.rapido : substituto.get(p.id)!.normal)
@@ -247,7 +249,7 @@ Deno.serve(async (req) => {
         console.log(JSON.stringify({ ev: "ia_falha", provedor: p.id, modelo, status: r.status, corpo: t.slice(0, 200) }));
         erros.push(`${p.nome} ${r.status}: ${t}`);
         // modelo retirado ou renomeado pelo provedor: descobre outro na lista do próprio provedor e usa nas próximas chamadas
-        if ((r.status === 404 || r.status === 410 || (r.status === 400 && /model/i.test(t))) && p.tipo === "openai") { pausa.set(p.id, Date.now() + 20_000); await trocaModelo(p, modelo).then(() => { if (substituto.has(p.id)) pausa.delete(p.id); }).catch(() => {}); }
+        if ((r.status === 404 || r.status === 410 || (r.status === 400 && /model/i.test(t))) && p.tipo === "openai") { pausa.set(p.id, Date.now() + 20_000); await trocaModelo(p, modelo).catch(() => {}); if (substituto.has(p.id)) { pausa.delete(p.id); if (!refeitos.has(p.id)) { refeitos.add(p.id); fila.splice(i + 1, 0, p); } } }
         if (r.status === 429 || r.status === 402) pausa.set(p.id, Date.now() + (Number(r.headers.get("retry-after")) * 1000 || 60_000));
         else if (r.status === 401 || r.status === 403) pausa.set(p.id, Date.now() + 10 * 60_000);
         continue; // próximo provedor

@@ -481,14 +481,23 @@ async function send(){if(busy){ctl?.abort();return}const text=$("inp").value.tri
   /* encolhe resultados antigos de ferramentas: mantém o contexto pequeno para as IAs grátis */
   const enxugar=()=>{const idx=CONV.api.map((m,i)=>m.role==="user"&&Array.isArray(m.content)&&m.content.some(b=>b.type==="tool_result")?i:-1).filter(i=>i>=0);
     for(const i of idx.slice(0,-1))CONV.api[i].content=CONV.api[i].content.map(b=>b.type==="tool_result"&&typeof b.content==="string"&&b.content.length>900?{...b,content:b.content.slice(0,900)+"…(resumido)"}:b)};
+  /* converte o histórico com chamadas de ferramenta em conversa de texto puro (resultados já resumidos) */
+  const achatar=(api,final)=>{const out=[];const add=(role,t)=>{if(!t)return;const u=out[out.length-1];if(u&&u.role===role)u.content[0].text+="\n\n"+t;else out.push({role,content:[{type:"text",text:t}]})};
+    for(const m of api){const bl=Array.isArray(m.content)?m.content:[{type:"text",text:String(m.content)}];
+      if(m.role==="assistant"){const t=bl.filter(b=>b.type==="text").map(b=>b.text).join(" ").trim();const u=bl.filter(b=>b.type==="tool_use").map(b=>`${TOOL_LABEL[b.name]||b.name}: ${JSON.stringify(b.input).slice(0,200)}`).join("; ");add("assistant",[t,u?"[busquei — "+u+"]":""].filter(Boolean).join(" ")||"(…)")}
+      else{const r=bl.filter(b=>b.type==="tool_result").map(b=>"Resultado: "+String(b.content).slice(0,1400)).join("\n");const t=bl.filter(b=>b.type==="text"&&b.text).map(b=>b.text).join("\n");add("user",[r,t].filter(Boolean).join("\n"))}}
+    add("user",final);if(out[0]?.role!=="user")out.unshift({role:"user",content:[{type:"text",text:"(início)"}]});return out};
   const FINAL="Pare de usar ferramentas agora. Responda ao usuário com o que já encontrou: o que achou (com os caminhos dos arquivos), o que ainda falta e o próximo passo prático. Se o pedido era um modelo 3D, monte com as dimensões que tiver e diga quais estimou.";
   try{for(let turn=0;turn<16;turn++){curText={t:"text",v:""};curEl=document.createElement("div");curEl.className="md";wrap.append(curEl);const myEl=curEl,myPart=curText;let shown=false;
       if(typeof assistPoda==="function")assistPoda(CONV.api);
-      enxugar();if(rodadas>=6&&!forcar){forcar=true;const ult=CONV.api[CONV.api.length-1];if(ult?.role==="user"&&Array.isArray(ult.content))ult.content.push({type:"text",text:FINAL});ui.step("Juntando o que foi encontrado…")}
-      const res=await iaStream({tier:$("tier").value,system:systemPrompt(),tools:ferramentasDoPedido(),sem_ferramentas:forcar||undefined,max_tokens:8000,messages:CONV.api,pular},{signal:ctl.signal,onText:t=>{myPart.v=t;myEl.innerHTML=md(t);if(!shown){amsg.parts.push(myPart);shown=true}scroll()}});
+      enxugar();if(rodadas>=6&&!forcar){forcar=true;ui.step("Juntando o que foi encontrado…")}
+      /* fase final: histórico em texto puro e sem ferramentas — nenhuma IA consegue pedir outra busca */
+      const res=await iaStream(forcar?{tier:$("tier").value,system:systemPrompt(),max_tokens:4000,messages:achatar(CONV.api,FINAL),pular}:{tier:$("tier").value,system:systemPrompt(),tools:ferramentasDoPedido(),max_tokens:8000,messages:CONV.api,pular},{signal:ctl.signal,onText:t=>{myPart.v=t;myEl.innerHTML=md(t);if(!shown){amsg.parts.push(myPart);shown=true}scroll()}});
       if(!shown&&!myPart.v)myEl.remove();if(res.prov?.provedor){amsg.prov=res.prov;lastProv=res.prov}
       /* resposta vazia (sem texto e sem ferramenta): tenta de novo em outra IA */
       if(!res.content.some(b=>(b.type==="text"&&b.text.trim())||b.type==="tool_use")&&vazias<2){vazias++;if(res.prov?.provedor)pular.push(res.prov.provedor);ui.step(`A IA ${res.prov?.provedor||""} não respondeu; tentando outra…`);continue}
+      if(forcar&&!res.content.some(b=>b.type==="text"&&b.text.trim())&&vazias<4){vazias++;if(res.prov?.provedor)pular.push(res.prov.provedor);ui.step(`A IA ${res.prov?.provedor||""} não respondeu; tentando outra…`);continue}
+      if(forcar&&!res.content.some(b=>b.type==="text"&&b.text.trim())){const t="Não consegui que nenhuma IA gratuita redigisse a resposta agora (limite de uso por minuto). Os arquivos achados estão nos cartões acima. Tente de novo em um minuto ou peça: \"resuma o que você achou\".";myEl.innerHTML=md(t);amsg.parts.push({t:"text",v:t});res.content=[{type:"text",text:t}]}
       CONV.api.push({role:"assistant",content:res.content.length?res.content:[{type:"text",text:"(sem resposta)"}]});
       if(res.content.some(b=>b.type==="text"&&b.text.trim().length>20))deuTexto=true;
       const calls=res.content.filter(b=>b.type==="tool_use");if(res.stop!=="tool_use"||!calls.length||forcar){if(!deuTexto&&!forcar){forcar=true;CONV.api.push({role:"user",content:[{type:"text",text:FINAL}]});continue}break}
