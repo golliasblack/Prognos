@@ -2,6 +2,7 @@
 // Função pura: recebe o banco lido pelo LibreDWG e devolve só números e textos do desenho — nada estimado.
 const lp = s => String(s ?? "").replace(/\\[A-Za-z][^;\\]*;|\\P|[{}]|\\~/g, " ").replace(/%%[cC]/g, "Ø").replace(/%%[pP]/g, "±").replace(/%%d/gi, "°").replace(/\s+/g, " ").trim();
 const num = v => Math.round(+v * 10) / 10;
+const atx = a => lp(typeof a?.text === "string" ? a.text : (a?.text && typeof a.text === "object" ? (a.text.text ?? a.text.textString ?? "") : (a?.textString ?? "")));
 export function resumoCAD(db, opt = {}) {
   const ents = [...(db.entities || [])];
   const dims = [], textos = [], itens = [], elev = [];
@@ -17,13 +18,13 @@ export function resumoCAD(db, opt = {}) {
       const p = e.startPoint || e.insertionPoint || { x: 0, y: 0 }, t = lp(e.text || e.textString || "");
       if (t) textos.push({ t, x: p.x, y: p.y, l: e.layer });
     } else if (e.type === "INSERT" && Array.isArray(e.attribs) && e.attribs.length) {
-      const at = e.attribs.map(a => lp(a.text || a.textString || "")).filter(Boolean);
+      const at = e.attribs.map(atx).filter(Boolean);
       if (at.length) itens.push({ bloco: e.name, x: e.insertionPoint.x, y: e.insertionPoint.y, attr: at });
     }
   }
   // cotas de nível ("+1300", "-4774", "+0.00") ficam em camadas de cota como texto
   for (const t of textos) { const m = /^([+\-±])\s*(\d+(?:[.,]\d+)?)$/.exec(t.t.replace(/\s/g, "")); if (m) elev.push({ v: (m[1] === "-" ? -1 : 1) * parseFloat(m[2].replace(",", ".")), x: t.x, y: t.y }); }
-  for (const e of ents) if (e.type === "INSERT" && Array.isArray(e.attribs)) for (const a of e.attribs) { const t = lp(a.text || ""); const m = /^([+\-])\s*(\d+(?:[.,]\d+)?)$/.exec(t); if (m) elev.push({ v: (m[1] === "-" ? -1 : 1) * parseFloat(m[2].replace(",", ".")), x: a.startPoint?.x ?? e.insertionPoint.x, y: a.startPoint?.y ?? e.insertionPoint.y }); }
+  for (const e of ents) if (e.type === "INSERT" && Array.isArray(e.attribs)) for (const a of e.attribs) { const t = atx(a); const m = /^([+\-])\s*(\d+(?:[.,]\d+)?)$/.exec(t); if (m) elev.push({ v: (m[1] === "-" ? -1 : 1) * parseFloat(m[2].replace(",", ".")), x: a.startPoint?.x ?? a.text?.startPoint?.x ?? e.insertionPoint.x, y: a.startPoint?.y ?? a.text?.startPoint?.y ?? e.insertionPoint.y }); }
   // agrupa cotas por vizinhança (cada grupo é uma vista/corte)
   const lim = opt.lim || 4500, pai = dims.map((_, i) => i);
   const f = i => pai[i] === i ? i : (pai[i] = f(pai[i]));
@@ -76,7 +77,56 @@ export function perfilCorte(db, v, ctx) {
   const zb = ctx.cota_fundo, z = y => Math.round(y - base.c0 + zb), x = X => Math.round(X - xa), zTopo = ctx.topo ?? 1500;
   let caixas = [...Vs.map(p => ({ t: "parede", x0: x(p.c0), x1: x(p.c1), z0: z(p.a), z1: z(p.b) })), ...Hs.map(p => ({ t: "laje", x0: x(p.a), x1: x(p.b), z0: z(p.c0), z1: z(p.c1) }))].filter(c => c.z0 <= zTopo && c.z1 >= zb - 5).map(c => ({ ...c, z1: Math.min(c.z1, zTopo - 200) })).filter(c => c.z1 - c.z0 >= 300);
   const fora = []; for (const c of caixas) { const d = fora.find(o => o.t === c.t && Math.abs(o.x0 - c.x0) < 25 && Math.abs(o.x1 - c.x1) < 25 && Math.abs(o.z0 - c.z0) < 25 && Math.abs(o.z1 - c.z1) < 25); if (!d) fora.push(c) }
-  return { comprimento: Math.round(H.v), caixas: fora.sort((p, q) => p.t.localeCompare(q.t) || p.x0 - q.x0) };
+  return { comprimento: Math.round(H.v), xa, c0: base.c0, zb, caixas: fora.sort((p, q) => p.t.localeCompare(q.t) || p.x0 - q.x0) };
+}
+
+
+// ---------- geometria real dos cortes: hachuras (material) e linhas (equipamentos) levadas para o sistema do modelo (x ao longo do comprimento, z em mm)
+const ESTAMPA = { "AR-CONC": "concreto", "ANSI31": "aco", "ANSI32": "aco", "ANSI33": "aco", "EARTH": "terreno", "GRATE": "grade" };
+const MR = Math.PI / 12;
+function arco(cx, cy, r, a0, a1, ccw) { if (ccw) { while (a1 <= a0) a1 += 2 * Math.PI } else { while (a1 >= a0) a1 -= 2 * Math.PI } const n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / MR)), o = []; for (let i = 0; i <= n; i++) { const a = a0 + (a1 - a0) * i / n; o.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]) } return o }
+function lacosHachura(e) {
+  const out = [];
+  for (const p of e.boundaryPaths || []) {
+    if (p.vertices && p.vertices.length > 2) { out.push(p.vertices.map(q => [q.x, q.y])); continue }
+    const pts = []; let ok = true;
+    const add = q => { const u = pts[pts.length - 1]; if (!u || Math.hypot(u[0] - q[0], u[1] - q[1]) > 0.5) pts.push(q) };
+    for (const g of p.edges || []) {
+      if (g.type === 1) { add([g.start.x, g.start.y]); add([g.end.x, g.end.y]) }
+      else if (g.type === 2) { for (const q of arco(g.center.x, g.center.y, g.radius, g.startAngle, g.endAngle, g.isCCW)) add(q) }
+      else ok = false;
+    }
+    if (ok && pts.length > 2) out.push(pts);
+  }
+  return out;
+}
+const area = P => { let a = 0; for (let i = 0, j = P.length - 1; i < P.length; j = i++) a += (P[j][0] + P[i][0]) * (P[j][1] - P[i][1]); return Math.abs(a / 2) };
+export function hachurasVista(db, v, M, marg = 1200) {
+  const out = [];
+  for (const e of db.entities || []) {
+    if (e.type !== "HATCH" || /imagin|defpoints/i.test(e.layer || "")) continue;
+    const mat = ESTAMPA[String(e.patternName || "").toUpperCase()]; if (!mat || mat === "terreno") continue;
+    for (const L of lacosHachura(e)) {
+      const xs = L.map(q => q[0]), ys = L.map(q => q[1]), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      if (cx < v.x0 - marg || cx > v.x1 + marg || cy < v.y0 - marg || cy > v.y1 + marg) continue;
+      if (area(L) < 2500) continue;
+      out.push({ mat, pts: L.map(q => [Math.round(q[0] - M.xa), Math.round(q[1] - M.c0 + M.zb)]) });
+    }
+  }
+  return out;
+}
+export function linhasVista(db, v, M, marg = 800, max = 9000) {
+  const ruim = /cota|dim|text|eje|axis|imagin|defpoints|hatch|rayado|malla|grid/i, S = [];
+  const dentro = (x, y) => x >= v.x0 - marg && x <= v.x1 + marg && y >= v.y0 - marg && y <= v.y1 + marg;
+  const seg = (a, b) => { if (!dentro(a[0], a[1]) && !dentro(b[0], b[1])) return; if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 20) return; S.push([a[0] - M.xa, a[1] - M.c0 + M.zb, b[0] - M.xa, b[1] - M.c0 + M.zb]) };
+  for (const e of db.entities || []) {
+    if (ruim.test(e.layer || "")) continue;
+    if (e.type === "LINE") seg([e.startPoint.x, e.startPoint.y], [e.endPoint.x, e.endPoint.y]);
+    else if (e.type === "LWPOLYLINE") { const w = e.vertices || []; for (let i = 0; i < w.length - 1; i++) seg([w[i].x, w[i].y], [w[i + 1].x, w[i + 1].y]); if ((e.flag & 1) && w.length > 2) seg([w[w.length - 1].x, w[w.length - 1].y], [w[0].x, w[0].y]) }
+    else if (e.type === "ARC" || e.type === "CIRCLE") { const c = e.center; if (!c || !dentro(c.x, c.y)) continue; const P = e.type === "CIRCLE" ? arco(c.x, c.y, e.radius, 0, 2 * Math.PI, true) : arco(c.x, c.y, e.radius, e.startAngle, e.endAngle, true); for (let i = 0; i < P.length - 1; i++) seg(P[i], P[i + 1]) }
+  }
+  S.sort((a, b) => Math.hypot(b[2] - b[0], b[3] - b[1]) - Math.hypot(a[2] - a[0], a[3] - a[1]));
+  return S.slice(0, max).flat().map(Math.round);
 }
 
 // Sugestão de parâmetros de um poço/canal de concreto; cada valor traz a cota ou as linhas de onde veio.
@@ -99,6 +149,16 @@ export function sugestaoPoco(R, db) {
   ev.push(P.cota_fundo === min ? `fundo na cota ${min}: menor nível do corte` : `fundo da laje em ${P.cota_fundo}: o nível ${min} é o topo da laje (${P.altura_parede} = ${Math.abs(min)} + ${e}); topo da parede em ±0,00`);
   let perfil = null; try { if (db) perfil = perfilCorte(db, A, { cota_fundo: P.cota_fundo, esp: e, topo: Math.max(...niveis.filter(n => n < 3000)) + 200 }) } catch (er) {}
   if (perfil && perfil.caixas.length) { P.corte = perfil.caixas; ev.push(`${perfil.caixas.length} paredes/lajes lidas das linhas paralelas do corte (distância 150–800 mm), com posições x/z reais`) }
-  const nao = ["armaduras, chumbadores, grelhas, escadas, tubulações e equipamentos dos detalhes", "colunas/pórtico dos eixos PV e plataformas (posição em relação ao poço não confirmada pelas cotas)", "trecho de canal/túnel (níveis -2373, -4774) e demais vistas"];
-  return { familia: "poco_concreto", parametros: P, evidencias: ev, niveis_do_desenho: niveis, nao_modelado: nao };
+  let geo3d = null;
+  try {
+    if (perfil && perfil.caixas.length) {
+      const M = { xa: perfil.xa, c0: perfil.c0, zb: perfil.zb };
+      geo3d = { longitudinal: { hachuras: hachurasVista(db, A, M), linhas: linhasVista(db, A, M) } };
+      const conc = geo3d.longitudinal.hachuras.filter(h => h.mat === "concreto");
+      if (conc.length) { P.hachuras_concreto = conc.map(h => h.pts); ev.push(`${conc.length} polígonos de concreto (hachura AR-CONC) lidos do corte longitudinal, com o contorno real`) }
+      if (B) { const pb = perfilCorte(db, B, { cota_fundo: P.cota_fundo, esp: e, topo: Math.max(...niveis.filter(n => n < 3000)) + 200 }); if (pb) { const Hb = maior(B.cotas_horizontais), Mb = { xa: pb.xa + 0, c0: pb.c0, zb: pb.zb }; geo3d.transversal = { largura: Math.round(Hb.v), linhas: linhasVista(db, B, Mb) } } }
+    }
+  } catch (er) {}
+  const nao = ["armaduras, chumbadores, grelhas, escadas, tubulações e equipamentos dos detalhes", "colunas/pórtico dos eixos PV e plataformas (posição em relação ao poço não confirmada pelas cotas; aparecem só como linhas do desenho de referência)", "trecho de canal/túnel (níveis -2373, -4774) e demais vistas"];
+  return { familia: "poco_concreto", parametros: P, evidencias: ev, niveis_do_desenho: niveis, nao_modelado: nao, geo3d };
 }

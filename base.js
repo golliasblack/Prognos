@@ -219,7 +219,7 @@ async function baseBuscar(consulta,limite=8){if(!(await docsCount().catch(()=>0)
   docs.sort((a,b)=>b._s-a._s);const out=[];
   for(const d of docs.slice(0,limite)){let tre=[];if(BASE.dir&&raizDe(d.p)===BASE.pasta&&!["imagem","video","audio","cad","outro","digitalizado","programa","zip","desenho"].includes(d.k)){try{const tx=await textoDoArquivo(d.p);if(tx)tre=trechosCom(tx,ts,2)}catch(e){}}
     if(tre.length)tre.forEach(x=>out.push({origem:"arquivo",caminho:d.p,nome:d.n,pagina:x.pagina,texto:x.texto,tipo:d.k}));
-    else out.push({origem:"arquivo",caminho:d.p,nome:d.n,pagina:null,texto:d.r||`(${d.k}: só pelo nome)`,tipo:d.k})}
+    else out.push({origem:"arquivo",caminho:d.p,nome:d.n,pagina:null,texto:d.fc?d.fc.slice(0,900):d.r||`(${d.k}: só pelo nome)`,tipo:d.k})}
   return out}
 async function baseLerArquivo(caminho,{procurar,inicio=0,tamanho=12000}={}){const tx=await textoDoArquivo(caminho);if(tx==null){const [d]=await docsGet([caminho]);return {erro:"O original está na pasta da unidade, que não está conectada neste computador. Use o resumo do mapa ou peça ao usuário para conectar a pasta.",resumo:d?.r||null}}
   if(procurar){const tr=trechosCom(tx,termosDe(procurar,8),5,1500);return {caminho,total:tx.length,trechos:tr}}

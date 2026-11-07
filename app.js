@@ -34,7 +34,7 @@ function md(t){const L=esc(String(t||"")).split("\n");let h="",inL=null,inC=fals
   if(inC)h+=`<pre><code>${code}</code></pre>`;closeL();closeT();return h}
 
 /* ======================= ANEXOS ======================= */
-let ULT_CAD=null;const ANX={};let anxSeq=0,pending=[];
+let ULT_CAD=null,ULT_GEO=null;const ANX={};let anxSeq=0,pending=[];
 async function downscale(blob,max=1568){try{const bmp=await createImageBitmap(blob);const s=Math.min(1,max/Math.max(bmp.width,bmp.height));const cv=document.createElement("canvas");cv.width=Math.round(bmp.width*s);cv.height=Math.round(bmp.height*s);cv.getContext("2d").drawImage(bmp,0,0,cv.width,cv.height);return await new Promise(r=>cv.toBlob(r,"image/jpeg",.85))}catch(e){return blob}}
 async function videoFrames(file,n=6){const v=document.createElement("video");v.muted=true;v.playsInline=true;v.src=URL.createObjectURL(file);
   await new Promise(r=>{v.onloadeddata=r;setTimeout(r,8000)});const d=v.duration;const out=[];if(!isFinite(d)||!d)return out;
@@ -401,9 +401,9 @@ async function runTool(name,input,ui){
     if(input.arquivo_base){const f=await abrirArquivo(input.arquivo_base);alvos.push({nome:input.arquivo_base,file:f})}
     if(!alvos.length)return {erro:"informe anexos ou arquivo_base (DWG)"};const out=[];
     for(const t of alvos){try{const R=await dwgGeo(t.file);const cut=l=>(l||[]).slice(0,45);R.vistas=R.vistas.slice(0,8).map(v=>({...v,cotas_horizontais:cut(v.cotas_horizontais),cotas_verticais:cut(v.cotas_verticais),outras:cut(v.outras),rotulos:v.rotulos.slice(0,10),itens:v.itens.slice(0,10)}));const DISC={ELE:"elétrica",TUB:"tubulação",CIV:"civil",MEC:"mecânica",INS:"instrumentação",AUT:"automação",ARQ:"arquitetura",EST:"estrutura",HID:"hidráulica",PRO:"processo"};const dm=/(?:^|[^A-Za-z])(ELE|TUB|CIV|MEC|INS|AUT|ARQ|EST|HID|PRO)\d{2,}/i.exec(String(t.nome).split("/").pop());const disc=dm?DISC[dm[1].toUpperCase()]:null;
-      if(disc&&disc!=="civil"){R.sugestao_poco=null}ULT_CAD=R;out.push({arquivo:t.nome,disciplina:disc||"não identificada pelo nome",...R})}catch(e){out.push({arquivo:t.nome,erro:String(e.message||e)})}}
+      if(disc&&disc!=="civil"){R.sugestao_poco=null}ULT_CAD=R;ULT_GEO=null;if(R.sugestao_poco){const SP=R.sugestao_poco;ULT_GEO={hach:SP.parametros&&SP.parametros.hachuras_concreto,lin:SP.geo3d&&SP.geo3d.longitudinal&&SP.geo3d.longitudinal.linhas};if(SP.parametros)delete SP.parametros.hachuras_concreto;delete SP.geo3d}out.push({arquivo:t.nome,disciplina:disc||"não identificada pelo nome",...R})}catch(e){out.push({arquivo:t.nome,erro:String(e.message||e)})}}
     return {desenhos:out,aviso:"cotas em mm; de/ate/y/x são posições dentro da vista; use só estes números na montagem"}}
-  if(name==="modelo_3d"){const M=input.modelo||{};for(const e of M.equipamentos||[])if(e.familia==="poco_concreto"&&ULT_CAD?.sugestao_poco?.parametros){e.parametros={...(e.parametros||{}),...ULT_CAD.sugestao_poco.parametros};e.origem="desenho"}
+  if(name==="modelo_3d"){const M=input.modelo||{};for(const e of M.equipamentos||[])if(e.familia==="poco_concreto"&&ULT_CAD?.sugestao_poco?.parametros){e.parametros={...(e.parametros||{}),...ULT_CAD.sugestao_poco.parametros};e.origem="desenho";if(ULT_GEO){if(ULT_GEO.hach&&ULT_GEO.hach.length)e.parametros.hachuras_concreto=ULT_GEO.hach;if(ULT_GEO.lin&&ULT_GEO.lin.length)e.parametros.linhas_ref=ULT_GEO.lin}}
     M.equipamentos=M.equipamentos||[];if(!(M.pecas||[]).length&&!(M.equipamentos||[]).length)return {erro:"modelo sem peças nem equipamentos"};await loadScript("vendor/three.min.js");
     const pecas=eng3dPrepara(JSON.parse(JSON.stringify(M))),A=eng3dAnalisa(M,pecas);const MP=JSON.parse(JSON.stringify(M));ui.card("montagem",{modelo:M});salvarModelo3d(M).catch(()=>{});
     return {pecas:pecas.length,equipamentos:MP._resumo||eng3dResumo(M),unidade:A.un,ajustes_coaxiais:A.ajustes.map(({a,b,diam_externo,diam_furo,interferencia,folga,comprimento,previsto})=>({a,b,diam_externo,diam_furo,interferencia,folga,comprimento,previsto})),colisoes:A.conflitos.map(c=>({a:c.a,b:c.b,volume:+c.volume.toPrecision(3),centro:[c.centro.x,c.centro.y,c.centro.z].map(v=>+v.toFixed(3)),prevista:c.previsto}))}}

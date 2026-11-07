@@ -1,6 +1,7 @@
 // Prognos · leitor de DWG (LibreDWG em WebAssembly) — roda isolado num worker.
 import { LibreDwg, Dwg_File_Type } from "./libredwg/dist/libredwg-web.js";
 import { resumoCAD, sugestaoPoco } from "./cad-digest.js";
+import { fichaCAD } from "./cad-ficha.js";
 let lib = null;
 const limpa = s => String(s ?? "").replace(/\\[A-Za-z][^;\\]*;|\\P|[{}]|\\~/g, " ").replace(/%%[cdp]/gi, " ").replace(/\s+/g, " ").trim();
 function coleta(ents, out, cont) {
@@ -19,13 +20,17 @@ onmessage = async (ev) => {
     const dwg = lib.dwg_read_data(buf, Dwg_File_Type.DWG);
     if (!dwg) throw new Error("não abriu");
     const db = lib.convert(dwg);
-    if (modo === "geo") { const R = resumoCAD(db); let S = null; try { S = sugestaoPoco(R, db) } catch (e) {} try { lib.dwg_free(dwg); } catch (e) {} postMessage({ id, ok: true, texto: JSON.stringify({ ...R, sugestao_poco: S }) }); return; }
+    if (modo === "geo") { const R = resumoCAD(db); let S = null, F = null; try { S = sugestaoPoco(R, db) } catch (e) {} try { F = fichaCAD(db) } catch (e) {} try { lib.dwg_free(dwg); } catch (e) {}
+      if (F?.ficha?.lista_pecas) delete R.lista_pecas;
+      postMessage({ id, ok: true, texto: JSON.stringify({ ficha: F?.ficha || null, ...R, sugestao_poco: S }) }); return; }
     const textos = [], cont = {};
     coleta(db.entities, textos, cont);
     for (const b of db.tables?.BLOCK_RECORD?.entries || []) if (!String(b.name || "").startsWith("*Model")) coleta(b.entities, textos, {});
     const camadas = (db.tables?.LAYER?.entries || []).map(l => l.name).filter(Boolean);
+    let F = null; try { F = fichaCAD(db) } catch (e) {}
     try { lib.dwg_free(dwg); } catch (e) {}
     const unicos = [...new Set(textos.filter(t => t && t.length > 1))];
-    postMessage({ id, ok: true, texto: `Camadas: ${camadas.slice(0, 80).join(", ")}\nEntidades: ${Object.entries(cont).map(([k, v]) => k + " " + v).join(", ")}\nTextos: ${unicos.join(" | ")}`.slice(0, 200000) });
+    const cab = F && F.texto ? "FICHA DO DESENHO\n" + F.texto + "\n\n" : "";
+    postMessage({ id, ok: true, ficha: F ? { texto: F.texto, resumo: F.resumo, tem_carimbo: F.tem_carimbo, ficha: F.ficha } : null, texto: cab + `Camadas: ${camadas.slice(0, 80).join(", ")}\nEntidades: ${Object.entries(cont).map(([k, v]) => k + " " + v).join(", ")}\nTextos: ${unicos.join(" | ")}`.slice(0, 200000) });
   } catch (e) { lib = null; postMessage({ id, ok: false, erro: String(e?.message || e) }); }
 };

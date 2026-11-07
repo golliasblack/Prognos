@@ -67,6 +67,7 @@ async function eng3dCena(el,{pecas,escala=1,interf=[],marcadores=[]}){await load
     const linha=new T.LineBasicMaterial({color:0x0b0b0b,transparent:true,opacity:.35,clippingPlanes:[corte]});
     for(const geo of pc._geos){g.add(new T.Mesh(geo,mat));if(geo.attributes.position.count<60000)g.add(new T.LineSegments(new T.EdgesGeometry(geo,30),linha))}
     for(const geo of pc._furos||[]){g.add(new T.Mesh(geo,new T.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.35,depthWrite:false,clippingPlanes:[corte]})))}
+    if(pc.ref&&pc.ref.seg&&pc.ref.seg.length>3){const P=[],S=pc.ref.seg,y=numE(pc.ref.y);for(let i=0;i+3<S.length;i+=4)P.push(S[i],y,S[i+1],S[i+2],y,S[i+3]);const lg=new T.BufferGeometry();lg.setAttribute('position',new T.Float32BufferAttribute(P,3));g.add(new T.LineSegments(lg,new T.LineBasicMaterial({color:pc.ref.cor||0x6aa9ff,transparent:true,opacity:.8,clippingPlanes:[corte]})))}
     g.userData.peca=pc;raiz.add(g);objs.set(pc.id,{g,mat,op:mat.opacity})}
   const mk=new T.Group();raiz.add(mk);
   for(const c of interf){const geo=new T.BufferGeometry().setFromPoints(c.pontos||[]);mk.add(new T.Points(geo,new T.PointsMaterial({color:0xff3b3b,size:4,sizeAttenuation:false,depthTest:false})))}
@@ -89,10 +90,10 @@ async function eng3dCena(el,{pecas,escala=1,interf=[],marcadores=[]}){await load
     obj:()=>{let s="# Prognos · Black and White\n",off=1;for(const [id,o] of objs){s+=`o ${String(id).replace(/\s+/g,"_")}\n`;o.g.traverse(m=>{if(!m.isMesh)return;const g=m.geometry.index?m.geometry.toNonIndexed():m.geometry,p=g.attributes.position;for(let i=0;i<p.count;i++)s+=`v ${(p.getX(i)*escala).toFixed(5)} ${(p.getY(i)*escala).toFixed(5)} ${(p.getZ(i)*escala).toFixed(5)}\n`;for(let i=0;i<p.count;i+=3)s+=`f ${off+i} ${off+i+1} ${off+i+2}\n`;off+=p.count})}return s}}}
 
 /* ---------- cartão do modelo */
-function eng3dPrepara(M){const X=typeof expandirEquipamentos==="function"?expandirEquipamentos(M):{pecas:M.pecas||[],resumo:[]};M._resumo=X.resumo;const pecas=X.pecas.map((p,i)=>({id:p.id||p.nome||"peca"+(i+1),nome:p.nome||p.id||"peça "+(i+1),disciplina:DISC_COR[p.disciplina]?p.disciplina:"outro",cor:p.cor,origem:p.origem||"estimado",fonte:p.fonte,opacidade:p.opacidade,equipamento:p.equipamento,
-  solidos:(p.solidos||[]).filter(s=>s&&s.forma),vazios:(p.vazios||[]).filter(s=>s&&s.forma)})).filter(p=>p.solidos.length);
+function eng3dPrepara(M){const X=typeof expandirEquipamentos==="function"?expandirEquipamentos(M):{pecas:M.pecas||[],resumo:[]};M._resumo=X.resumo;const pecas=X.pecas.map((p,i)=>({id:p.id||p.nome||"peca"+(i+1),nome:p.nome||p.id||"peça "+(i+1),disciplina:DISC_COR[p.disciplina]?p.disciplina:"outro",cor:p.cor,origem:p.origem||"estimado",fonte:p.fonte,opacidade:p.opacidade,equipamento:p.equipamento,ref:p.ref_linhas,
+  solidos:(p.solidos||[]).filter(s=>s&&s.forma),vazios:(p.vazios||[]).filter(s=>s&&s.forma)})).filter(p=>p.solidos.length||p.ref);
   for(const pc of pecas){pc._geos=pc.solidos.map(s=>{s._inv=solMatriz(s).invert();return solGeom(s)});pc._furos=pc.vazios.map(s=>{s._inv=solMatriz(s).invert();return solGeom(s)})}return pecas}
-function eng3dAnalisa(M,pecas){const un=M.unidade==="m"?"m":"mm",tol=un==="m"?1e-5:.005;
+function eng3dAnalisa(M,pecasT){const pecas=pecasT.filter(p=>p.solidos.length);const un=M.unidade==="m"?"m":"mm",tol=un==="m"?1e-5:.005;
   const aj=ajustesCoaxiais(pecas,tol),col=colisoes(pecas);const previstos=new Set((M.ajustes_previstos||[]).map(x=>[x[0],x[1]].sort().join("|")));
   const coax=new Set(aj.filter(a=>a.interferencia>0).map(a=>[a.a,a.b].sort().join("|")));
   const eqDe=new Map(pecas.map(p=>[p.id,p.equipamento]));const conflitos=col.filter(c=>!coax.has([c.a,c.b].sort().join("|"))&&!(eqDe.get(c.a)&&eqDe.get(c.a)===eqDe.get(c.b))).map(c=>({...c,previsto:previstos.has([c.a,c.b].sort().join("|"))}));

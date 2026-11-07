@@ -118,6 +118,15 @@ function pocoConcreto(p,sup){const L=num(p.comprimento,16000),W=num(p.largura,40
    {id:"laje_fundo",nome:`Laje de fundo ${L}×${W}×${ef}`,disciplina:"civil",solidos:[bx(L,W,ef,L/2,0,zf)]},
    {id:"paredes",nome:`Paredes perimetrais ${e} mm`,disciplina:"civil",opacidade:.55,solidos:[bx(L,e,H-ef,L/2,-(W/2-e/2),zf+ef),bx(L,e,H-ef,L/2,W/2-e/2,zf+ef),bx(e,W-2*e,H-ef,e/2,0,zf+ef),bx(e,W-2*e,H-ef,L-e/2,0,zf+ef)]}];
   const zt=zf+H;
+  const Wi0=W-2*e,ext=(pts,y0,esp,nome)=>({forma:"extrusao",pontos:pts,h:esp,pos:[0,y0+esp,0],rot:[90,0,0]});
+  if(Array.isArray(p.hachuras_concreto)&&p.hachuras_concreto.length){
+    const hz=p.hachuras_concreto.filter(P=>Array.isArray(P)&&P.length>=3&&P.every(q=>Array.isArray(q)&&isFinite(q[0])&&isFinite(q[1])));
+    if(hz.length){
+      pecas[1]=null;pecas[2]={id:"paredes",nome:`Paredes laterais ${e} mm (corte transversal)`,disciplina:"civil",opacidade:.45,solidos:[bx(L,e,H-ef,L/2,-(W/2-e/2),zf+ef),bx(L,e,H-ef,L/2,W/2-e/2,zf+ef)]};
+      const lp=pecas.filter(Boolean);lp.push({id:"concreto_corte",nome:`Concreto do corte longitudinal (${hz.length} contornos reais das hachuras)`,disciplina:"civil",opacidade:.8,solidos:hz.map(P=>ext(P,-Wi0/2,Wi0))});
+      const ref=Array.isArray(p.linhas_ref)&&p.linhas_ref.length>3?{seg:p.linhas_ref,y:-W/2+e+2,cor:0x6aa9ff}:null;
+      if(ref)lp.push({id:"desenho_ref",nome:"Linhas do corte do desenho (equipamentos, aço, escada — referência, sem volume)",disciplina:"outro",ref_linhas:ref,solidos:[]});
+      return {pecas:lp,dados:{comprimento:L,largura:W,altura_parede:H,cota_fundo:zf,cota_topo_parede:zt,esp_parede:e,contornos_de_concreto:hz.length,linhas_de_referencia:ref?ref.seg.length/4:0}}}}
   if(Array.isArray(p.corte)&&p.corte.length){const cx=p.corte.filter(c=>c&&isFinite(c.x0)&&isFinite(c.x1)&&isFinite(c.z0)&&isFinite(c.z1)&&c.x1>c.x0&&c.z1>c.z0),Wi=W-2*e;
     const par=cx.filter(c=>c.t!=="laje"),laj=cx.filter(c=>c.t==="laje");
     pecas[2]={id:"paredes",nome:`Paredes laterais ${e} mm (corte transversal)`,disciplina:"civil",opacidade:.45,solidos:[bx(L,e,H-ef,L/2,-(W/2-e/2),zf+ef),bx(L,e,H-ef,L/2,W/2-e/2,zf+ef)]};
