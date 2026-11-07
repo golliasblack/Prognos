@@ -527,11 +527,34 @@ async function send(){if(busy){ctl?.abort();return}const text=$("inp").value.tri
         catch(e){results.push({type:"tool_result",tool_use_id:c.id,is_error:true,content:String(e.message||e).slice(0,1000)});st.classList.remove("run");st.textContent=(TOOL_LABEL[c.name]||c.name)+": "+(e.message||"falhou").slice(0,120)}}
       CONV.api.push({role:"user",content:results})}}
   catch(e){if(e.name==="AbortError"){amsg.parts.push({t:"step",v:"Interrompido"});const d=document.createElement("div");d.className="step";d.textContent="Interrompido";wrap.append(d)}
-    else{const t=errText(e);amsg.parts.push({t:"err",v:t});const d=document.createElement("div");d.className="err";d.textContent=t;wrap.append(d);if(e.code==="session_expired")logout(true)}
+    else{const t=errText(e);amsg.parts.push({t:"err",v:t});const d=document.createElement("div");d.className="err";d.textContent=t;wrap.append(d);if(e.code==="session_expired")logout(true);
+      else if(!/^(not_granted|cota_diaria)$/.test(e.code||"")){try{const tx=await modoBorda(text,files,ui);if(tx){const m=document.createElement("div");m.className="md";m.innerHTML=md(tx);wrap.append(m);amsg.parts.push({t:"text",v:tx});CONV.api.push({role:"assistant",content:[{type:"text",text:tx}]})}}catch(e2){}}}
     const last=CONV.api[CONV.api.length-1];if(last?.role==="assistant"&&last.content.some(b=>b.type==="tool_use"))CONV.api.pop();if(CONV.api[CONV.api.length-1]?.role==="user")CONV.api.push({role:"assistant",content:[{type:"text",text:"(resposta interrompida)"}]})}
   if(amsg.prov){const d=document.createElement("div");d.className="prov";d.textContent=`${amsg.prov.provedor} · ${amsg.prov.modelo}`;wrap.append(d)}
   busy=false;setBusy(false);saveConv();refreshKB();if(typeof assistFalar==="function"){const t=amsg.parts.filter(p=>p.t==="text").map(p=>p.v).join("\n");assistFalar(t)}}
 function setBusy(b){const s=$("send");s.innerHTML=b?`<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>`:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>`;s.setAttribute("aria-label",b?"Parar":"Enviar")}
+
+
+/* ======================= MODO BORDA =======================
+   Quando o Supabase/IAs não respondem (projeto pausado, sem internet, limite), o Prognos continua útil:
+   roda no navegador as mesmas ferramentas (base local, leitura de CAD, 3D) e redige a resposta com regras, sem IA externa. */
+async function modoBorda(text,files,ui){
+  const out=[],q=String(text||"").toLowerCase(),dwg=(files||[]).filter(f=>/\.dwg$/i.test(f.nome));
+  const val=v=>typeof v==="string"||typeof v==="number";
+  if(dwg.length){
+    const r=await runTool("ler_desenho_cad",{anexos:dwg.map(f=>f.id)},ui);
+    for(const d of r.desenhos||[]){
+      if(d.erro){out.push(`**${d.arquivo}**: ${d.erro}`);continue}
+      const f=d.ficha||{},linhas=Object.entries(f).filter(([k,v])=>val(v)&&String(v).length<160&&!/^(texto|resumo)$/.test(k)).slice(0,10).map(([k,v])=>`- ${k.replace(/_/g," ")}: ${v}`);
+      out.push(`**${d.arquivo}** (${d.disciplina})\n${linhas.join("\n")||"- sem carimbo legível"}${(f.notas||[]).length?`\n- notas: ${f.notas.slice(0,4).join(" · ").slice(0,500)}`:""}`);
+      const sp=d.sugestao_poco;
+      if(sp&&/(3\s?d|modelo|monte|montar|maquete)/.test(q)){await runTool("modelo_3d",{modelo:{nome:"Modelo do desenho "+d.arquivo,unidade:"mm",equipamentos:[{id:"POCO",familia:"poco_concreto",parametros:{}}]}},ui);out.push("Modelo 3D montado com os contornos de concreto e as cotas lidas do desenho.")}
+    }}
+  else{
+    const r=await runTool("buscar_base",{consulta:text,limite:10},ui);
+    if(r.itens&&r.itens.length)out.push(`Achei ${r.encontrados} resultado(s) na base:\n`+r.itens.slice(0,8).map(i=>`- **${i.arquivo}**${i.pagina?` (p.${i.pagina})`:""}: ${i.texto}`).join("\n"));
+    else out.push("Não achei nada na base com estas palavras. Tente o código do equipamento ou do desenho.")}
+  return "*Modo borda: as IAs externas não responderam, então processei tudo aqui no seu navegador, sem IA.*\n\n"+out.join("\n\n")}
 
 /* ======================= COMPOSITOR ======================= */
 function grow(){const t=$("inp");t.style.height="auto";t.style.height=Math.min(220,t.scrollHeight)+"px"}

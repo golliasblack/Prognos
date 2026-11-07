@@ -1,5 +1,5 @@
 # Mantém o projeto Supabase do Prognos (plano free) ativo, evitando a pausa por inatividade.
-# Roda a cada 3 dias e também pode ser disparado manualmente (aba Actions > Run workflow).
+# Roda todo dia e também pode ser disparado manualmente (aba Actions > Run workflow).
 # A chave usada é a publicável (pública por natureza, a mesma do app.js); ela só consegue
 # escrever na tabela keep_alive. Para trocar, crie o secret SUPABASE_ANON_KEY no repositório.
 
@@ -7,7 +7,7 @@ name: Supabase Keep-Alive
 
 on:
   schedule:
-    - cron: "17 12 */3 * *"   # 12:17 UTC (09:17 Brasília), a cada 3 dias
+    - cron: "17 12 * * *"   # todo dia 12:17 UTC (09:17 Brasília)
   workflow_dispatch:
 
 jobs:
@@ -30,6 +30,11 @@ jobs:
           if [ "$STATUS" -ge 300 ]; then
             echo "Falha no ping ao Supabase"; exit 1
           fi
+
+      - name: Atividade extra (auth e função de borda)
+        run: |
+          curl -s -m 30 "$SUPABASE_URL/auth/v1/health" -H "apikey: $SUPABASE_KEY" | head -c 200; echo
+          curl -s -m 30 -o /dev/null -w "ia HTTP %{http_code}\n" -X OPTIONS "$SUPABASE_URL/functions/v1/ia"
 
       - name: Leitura de confirmação
         run: |
