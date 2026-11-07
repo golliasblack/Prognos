@@ -152,11 +152,30 @@ async function baseSincronizar(){if(typeof PERFIL==="undefined"||!PERFIL?.unidad
   BASE.prog.fase="";avisa()}
 
 /* ---------- indexação incremental */
+
+/* ---------- FICHA DE CADA DOCUMENTO (conhecimento profundo)
+   Além das palavras-chave, guarda de cada arquivo: tipo do documento (manual, datasheet, procedimento, desenho, relatório, ordem, proposta),
+   tags de equipamento achadas no texto, e o cabeçalho + rodapé. Assim o Prognos acha o documento mesmo sem o nome ou a tag exata. */
+const DT_REGRAS=[["manual",/manual|manuten[cç]|opera[cç]|instru[cç][aã]o de (uso|instal)|o&m|catalog|brochure|\bomm\b/],["datasheet",/data ?sheet|folha de dados|ficha t[eé]cnica|especifica[cç]|memorial|\bet[-_ ]\d|\bmd[-_ ]\d/],
+  ["procedimento",/procedimento|\bpop\b|\bpt[-_ ]\d|padr[aã]o|instru[cç][aã]o de trabalho|\bit[-_ ]\d|checklist|\bnr[-_ ]?\d|\bnbr\b|norma/],["desenho",/diagrama|esquema|unifilar|multifilar|planta|layout|as.?built|desenho|detalhe|fluxograma|p&id|\bde[-_ ]i?\d|isom[eé]tric/],
+  ["relatorio",/relat[oó]rio|laudo|inspe[cç][aã]o|termograf|an[aá]lise|parecer|estudo|\brca\b|\bata\b|auditoria/],["ordem",/\bom\b|ordem de|\bos\b|apontamento|nota de manuten|hist[oó]rico|parada|\bnm\b/],["proposta",/proposta|or[cç]amento|contrato|escopo|pedido|nota fiscal|cota[cç][aã]o/]];
+function classificaDoc(nome,head,ext,k){const n=normB(nome);for(const [t,r] of DT_REGRAS)if(r.test(n))return t;if(k==="cad"||k==="desenho"||ext==="dwg"||ext==="dxf")return "desenho";if(k==="imagem")return "foto";if(k==="video")return "video";
+  const h=normB(String(head).slice(0,500));for(const [t,r] of DT_REGRAS)if(r.test(h))return t;return k==="tabela"?"planilha":"outro"}
+const TAG_NEG=/^(ISO|IEC|NBR|NR|ASTM|DIN|ABNT|IP|RS|CAT|API|AWS|AISI|SAE|UL|EN|ANSI|IEEE|PDF|DWG|REV|FOLHA|FL|PAG|PAGE|ITEM|TIPO|LOTE|NCM|CNPJ|CPF|CEP|RG|TEL|FAX|ASME|BS|JIS|NEMA|AC|DC|PN|DN|SCH|CLASS|GRAU|ART|EPI|NFE|NF|OC|PO|PC)[-_ ]?\d/i;
+function extraiTags(texto){const c=new Map(),re=/\b[A-Z]{2,5}(?:[-_ ]?\d{2,5}[A-Z]?(?:[-_]\d{1,4}[A-Z]?)?)\b/g;let m,n=0;while((m=re.exec(texto))&&n++<4000){const t=m[0].replace(/[ _]/g,"-");if(TAG_NEG.test(t)||/^[A-Z]{2,5}-?\d{4}$/.test(t)&&+t.match(/\d+/)[0]>1900&&+t.match(/\d+/)[0]<2100)continue;c.set(t,(c.get(t)||0)+1)}
+  return [...c.entries()].sort((a,b)=>b[1]-a[1]).slice(0,25).map(x=>x[0])}
+function aplicaFicha(reg,limpo,{preservaFc}={}){const head=limpo.slice(0,700),foot=limpo.length>1400?limpo.slice(-450):"";reg.dt=classificaDoc(reg.n||reg.p,head,reg.e,reg.k);reg.tg=extraiTags(limpo.slice(0,200000)+" "+reg.n);
+  if(!(preservaFc&&reg.fc))reg.fc=(`[${reg.dt}] `+head+(foot?" … "+foot:"")).slice(0,1300);reg.v=2;
+  const tt=[];for(const t of reg.tg)for(const v of variantesTermo(normB(t)))tt.push(v);return tt}
+/* sinônimos e termos próximos da manutenção industrial: o usuário descreve, o Prognos entende */
+const SINONIMOS=["bomba pump bombeamento recalque","motor mot eletrico inducao","disjuntor breaker dj mccb acb nw","ponte rolante talha crane guindaste viga rolamento","redutor reducao gearbox engrenagem caixa","rolamento mancal bearing rolete","correia transportador esteira belt tambor","compressor ar comprimido kaeser pneumatico","valvula valve registro solenoide","transformador trafo transformer subestacao","cabo condutor cable fiacao eletroduto","painel quadro cubiculo ccm cdc armario","inversor drive vfd conversor frequencia soft starter","clp plc controlador automacao logix siemens step","sensor transmissor instrumento detector sonda","ventilador exaustor fan soprador","lubrificacao graxa oleo lubrificante","aquecimento temperatura superaquecimento termico termografia","vibracao ruido barulho folga desalinhamento","vazamento fuga gotejamento","parada falha quebra defeito pane avaria","tubulacao tubo duto linha flange","trocador resfriador torre refrigeracao chiller","laminador cadeira mesa laminacao","aciaria forno panela lingotamento fea","trefilaria trefila fieira","utilidades gmu agua vapor gas nitrogenio oxigenio","aterramento spda malha terra","protecao rele sobrecorrente seletividade","acoplamento luva eixo cardan"];
+function expandeConsulta(ts){const out=new Map();for(const t of ts){if(t.length<4)continue;for(const g of SINONIMOS){const ws=g.split(" ");if(ws.some(w=>w.length>=4&&(w.startsWith(t)||t.startsWith(w))||w===t))for(const w of ws)if(w!==t&&!ts.includes(w))out.set(w,.5)}}return [...out.entries()].slice(0,16).map(([t,w])=>({t,w}))}
+const INTENCAO_DT=[["manual",/manual|manuten[cç]|trocar|lubrific|como (fazer|montar|desmontar)|cat[aá]logo/],["desenho",/desenho|diagrama|esquema|planta|unifilar|layout|projeto/],["datasheet",/folha de dados|datasheet|especifica|ficha/],["procedimento",/procedimento|padr[aã]o|norma|checklist/],["relatorio",/relat[oó]rio|laudo|inspe|termograf/],["ordem",/ordem|hist[oó]rico|parada|apontamento/]];
 async function indexarUm(p,file,ext){const reg={p,n:file.name,e:ext,s:file.size,m:file.lastModified,k:tipoDe(ext),t:[],r:"",pg:0,ev:0};
   const nomeT=termosDe(p.replace(/[\/_]/g," "),24);
   try{const x=await extrairTexto(file,ext);reg.k=x.k;reg.pg=x.pg;if(x.nota)reg.x=x.nota;if(x.pf)reg.pf=1;
     const limpo=x.texto.replace(/\[p\.\d+\]|\[slide \d+\]|\[aba [^\]]*\]/g," ").replace(/\s+/g," ").trim();
-    reg.r=limpo.slice(0,420);reg.t=[...new Set([...nomeT,...termosDe(limpo,Math.min(220,40+Math.round(limpo.length/2500)))])];
+    reg.r=limpo.slice(0,420);const tt=aplicaFicha(reg,limpo);reg.t=[...new Set([...nomeT,...tt,...termosDe(limpo.slice(0,900),60),...termosDe(limpo,Math.min(320,60+Math.round(limpo.length/2000)))])];
     if(x.linhas){const evs=eventosDeTabela(x.linhas,file.name);if(evs.length){await enviarEventos(evs);reg.ev=evs.length;BASE.prog.eventos+=evs.length}}
     BASE.prog.lidos+=limpo?1:0}
   catch(e){reg.t=nomeT;reg.x="não consegui ler: "+String(e.message||e).slice(0,80);BASE.prog.erros++}
@@ -188,7 +207,7 @@ async function baseAtualizar({silencioso,modo="completo"}={}){if(BASE.rodando||!
     else if(mudou)await salvarIndice();
     P.fase=BASE.parar?"Pausado":"Base em dia"}
   catch(e){P.fase="Erro: "+(e.message||e);console.error(e)}
-  BASE.rodando=false;BASE.parar=false;avisa()}
+  const pausou=BASE.parar;BASE.rodando=false;BASE.parar=false;avisa();if(!pausou&&typeof baseProfunda==="function"&&(typeof PAPEL==="undefined"||PAPEL?.atualiza_base!==false))setTimeout(()=>baseProfunda({auto:true}),2500)}
 
 /* navegadores sem acesso a pasta: lê a lista escolhida (não reabre os originais depois) */
 async function baseIndexarLista(files){if(BASE.rodando||!files.length)return;BASE.rodando=true;BASE.parar=false;const raiz=(files[0].webkitRelativePath||"").split("/")[0]||"pasta";
@@ -214,12 +233,15 @@ async function baseBuscar(consulta,limite=8){if(!(await docsCount().catch(()=>0)
   for(const t of ts){const vis=new Set();for(const v of variantesTermo(t)){for(const k of await chavesPorTermo(v))if(!vis.has(k)){vis.add(k);pont.set(k,(pont.get(k)||0)+1)}}
     const m=t.match(TAG_RE);if(m){await todasChaves();const alvos=[...new Set([m[1]+m[2]+m[3],m[1]+m[2].padStart(2,"0")+m[3]])];BASE._chaves.c.forEach((c,i)=>{if(alvos.some(a=>new RegExp(a+"(?![0-9])").test(c))){const k=BASE._chaves.l[i];if(!vis.has(k)){vis.add(k);pont.set(k,(pont.get(k)||0)+1.5)}}})}
     else if(vis.size<5&&t.length>=4){await todasChaves();const a=compacto(t);if(a.length>=4)BASE._chaves.c.forEach((c,i)=>{if(c.includes(a)){const k=BASE._chaves.l[i];if(!vis.has(k)){vis.add(k);pont.set(k,(pont.get(k)||0)+1.2)}}})}}
-  const cand=[...pont.entries()].sort((a,b)=>b[1]-a[1]).slice(0,60);const docs=(await docsGet(cand.map(c=>c[0]))).filter(Boolean);
-  for(const d of docs){const nm=compacto(d.p);d._s=pont.get(d.p)*2+ts.filter(t=>variantesTermo(t).some(v=>nm.includes(compacto(v)))).length*3+(d.k==="digitalizado"||d.k==="cad"?0:.5)}
+  for(const {t,w} of expandeConsulta(ts)){const vis=new Set();for(const v of variantesTermo(t))for(const k of await chavesPorTermo(v))if(!vis.has(k)){vis.add(k);pont.set(k,(pont.get(k)||0)+w)}}
+  if(pont.size<12){const d=await idb();for(const t of ts)if(t.length>=5){const ks=await reqP(d.transaction("docs").objectStore("docs").index("t").getAllKeys(IDBKeyRange.bound(t,t+"\uffff"),300));for(const k of new Set(ks))pont.set(k,(pont.get(k)||0)+.8)}}
+  const qn=normB(consulta),dtq=INTENCAO_DT.filter(([,r])=>r.test(qn)).map(x=>x[0]);
+  const cand=[...pont.entries()].sort((a,b)=>b[1]-a[1]).slice(0,80);const docs=(await docsGet(cand.map(c=>c[0]))).filter(Boolean);
+  for(const d of docs){const nm=compacto(d.p);d._s=pont.get(d.p)*2+ts.filter(t=>variantesTermo(t).some(v=>nm.includes(compacto(v)))).length*3+(d.k==="digitalizado"||d.k==="cad"?0:.5)+(d.fc?1:0)+(dtq.includes(d.dt)?3:0)+(d.tg||[]).filter(g=>ts.some(t=>compacto(g).includes(compacto(t))&&compacto(t).length>=3)).length*2}
   docs.sort((a,b)=>b._s-a._s);const out=[];
   for(const d of docs.slice(0,limite)){let tre=[];if(BASE.dir&&raizDe(d.p)===BASE.pasta&&!["imagem","video","audio","cad","outro","digitalizado","programa","zip","desenho"].includes(d.k)){try{const tx=await textoDoArquivo(d.p);if(tx)tre=trechosCom(tx,ts,2)}catch(e){}}
-    if(tre.length)tre.forEach(x=>out.push({origem:"arquivo",caminho:d.p,nome:d.n,pagina:x.pagina,texto:x.texto,tipo:d.k}));
-    else out.push({origem:"arquivo",caminho:d.p,nome:d.n,pagina:null,texto:d.fc?d.fc.slice(0,900):d.r||`(${d.k}: só pelo nome)`,tipo:d.k})}
+    if(tre.length)tre.forEach(x=>out.push({origem:"arquivo",caminho:d.p,nome:d.n,pagina:x.pagina,texto:x.texto,tipo:d.k,tipo_doc:d.dt,tags:(d.tg||[]).slice(0,6)}));
+    else out.push({origem:"arquivo",caminho:d.p,nome:d.n,pagina:null,texto:d.fc?d.fc.slice(0,900):d.r||`(${d.k}: só pelo nome)`,tipo:d.k,tipo_doc:d.dt,tags:(d.tg||[]).slice(0,6)})}
   return out}
 async function baseLerArquivo(caminho,{procurar,inicio=0,tamanho=12000}={}){const tx=await textoDoArquivo(caminho);if(tx==null){const [d]=await docsGet([caminho]);return {erro:"O original está na pasta da unidade, que não está conectada neste computador. Use o resumo do mapa ou peça ao usuário para conectar a pasta.",resumo:d?.r||null}}
   if(procurar){const tr=trechosCom(tx,termosDe(procurar,8),5,1500);return {caminho,total:tx.length,trechos:tr}}

@@ -58,13 +58,15 @@ async function lerMidia(file,ext,video){const partes=[];const cab=await file.sli
 const PROF={rodando:false,parar:false,feitos:0,total:0,fase:"",inicio:0,erros:0};
 /* entra na passada profunda tudo que a primeira leitura só conheceu pelo nome, inclusive formatos que o Prognos passou a ler depois */
 const NOVOS_TEXTO=/^(odt|ott|odp|docm|dotx|pptm|ppsx|pps|svg|conf|yaml|yml|bat|cmd|ps1|vbs|sh|py|js|sql|reg|nfo|tex|srt|vtt|xaml|plcopen|tsproj|ap\d+|s7p|acd|mer|apa|xlsb|ots)$/;
-const precisaProfunda=d=>!d.pf&&((d.k==="cad"&&/^(dwg|dwf|dwfx)$/.test(d.e))||d.k==="digitalizado"||(d.k==="imagem"&&/^(tiff?|jpe?g|png|bmp|gif|webp)$/.test(d.e))
+const PRECISA_FICHA=/^(texto|tabela|desenho|dxf|zip)$/;
+const precisaProfunda=d=>((d.v||0)<2&&(PRECISA_FICHA.test(d.k)||d.e==='dwg')&&!d.x?.startsWith?.('grande')&&(d.s||0)<400e6)||!d.pf&&((d.k==="cad"&&/^(dwg|dwf|dwfx)$/.test(d.e))||d.k==="digitalizado"||(d.k==="imagem"&&/^(tiff?|jpe?g|png|bmp|gif|webp)$/.test(d.e))
   ||d.k==="video"||d.k==="audio"||d.k==="outro"||d.k==="programa"||(d.k==="zip"&&!/^zip$/.test(d.e))||NOVOS_TEXTO.test(d.e)||(d.e==="zip"&&!/\n\[/.test(d.r||"")&&!d.zl));
-const prioridade=d=>/^(dwg|dwf|dwfx)$/.test(d.e)?0:d.k==="digitalizado"?1:/^tiff?$/.test(d.e)?2:d.k==="imagem"?3:d.k==="video"?5:4;
-async function baseProfunda(){if(PROF.rodando||!BASE.dir)return;if(!(await permissao(BASE.dir,true))){BASE.dir=null;avisa();return}
+const NOME_IMP=/manual|datasheet|folha de dados|procedimento|memorial|as.?built|diagrama|esquema|unifilar|catalogo|laudo|relatorio|projeto|\bet[-_ ]\d/;
+const prioridade=d=>(NOME_IMP.test(normB(d.p||d.n||""))?0:10)+(/^(dwg|dwf|dwfx)$/.test(d.e)?0:d.k==="digitalizado"?1:/^(pdf|docx?|xlsx?|pptx?)$/.test(d.e)?2:/^tiff?$/.test(d.e)?3:d.k==="imagem"?4:d.k==="video"?6:5);
+async function baseProfunda(opc={}){if(PROF.rodando||BASE.rodando||!BASE.dir)return;if(!(await permissao(BASE.dir,!opc.auto))){if(!opc.auto){BASE.dir=null;avisa()}return}
   PROF.rodando=true;PROF.parar=false;PROF.erros=0;PROF.inicio=Date.now();avisa();
   try{const raiz=BASE.pasta;const fila=[];const d=await idb();
-    await new Promise((res,rej)=>{const r=d.transaction("docs").objectStore("docs").openCursor(IDBKeyRange.bound(raiz+"/",raiz+"/￿"));r.onsuccess=()=>{const c=r.result;if(!c)return res();const v=c.value;if(precisaProfunda(v))fila.push({p:v.p,e:v.e,k:v.k});c.continue()};r.onerror=()=>rej(r.error)});
+    await new Promise((res,rej)=>{const r=d.transaction("docs").objectStore("docs").openCursor(IDBKeyRange.bound(raiz+"/",raiz+"/￿"));r.onsuccess=()=>{const c=r.result;if(!c)return res();const v=c.value;if(precisaProfunda(v))fila.push({p:v.p,e:v.e,k:v.k,n:v.n});c.continue()};r.onerror=()=>rej(r.error)});
     fila.sort((a,b)=>prioridade(a)-prioridade(b));PROF.total=fila.length;PROF.feitos=0;avisa();const lote=[];let ult=Date.now(),mudou=0;
     for(const item of fila){if(PROF.parar)break;PROF.fase=/^(dwg|dwf|dwfx)$/.test(item.e)?"Lendo desenhos CAD":item.k==="digitalizado"?"Lendo PDFs digitalizados (OCR)":item.k==="imagem"?"Lendo imagens e TIF (OCR)":item.k==="video"?"Lendo vídeos (quadros com OCR)":"Abrindo pacotes, programas e outros formatos";
       try{const [doc]=await docsGet([item.p]);const f=await abrirArquivo(item.p);let x;
@@ -72,8 +74,8 @@ async function baseProfunda(){if(PROF.rodando||!BASE.dir)return;if(!(await permi
         else if(item.k==="video"||item.k==="audio")x=await lerMidia(f,item.e,item.k==="video");else{const y=await extrairTexto(f,item.e);x={k:y.k==="outro"?doc.k:y.k,texto:y.texto||"",nota:y.nota};if(item.e==="zip")doc.zl=1}
         const limpo=(x.texto||"").replace(/\[p\.\d+\]/g," ").replace(/\s+/g," ").trim();const nomeT=termosDe(item.p.replace(/[\/_]/g," "),24);
         const fic=x.ficha&&x.ficha.texto?x.ficha:null,vistas=fic?[...new Set((fic.ficha.folhas||[]).flatMap(f=>f.vistas||[]))].slice(0,8).join("; "):"";
-        Object.assign(doc,{pf:1,k:limpo?x.k:doc.k,r:fic&&fic.resumo?(fic.resumo+(vistas?" · vistas: "+vistas:"")).slice(0,420):limpo?limpo.slice(0,420):doc.r,t:[...new Set([...nomeT,...(fic?termosDe(fic.texto,90):[]),...termosDe(limpo,Math.min(220,40+Math.round(limpo.length/2500)))])]});if(fic)doc.fc=fic.texto.slice(0,3000);if(x.nota)doc.x=x.nota;if(limpo)mudou++;lote.push(doc)}
-      catch(e){PROF.erros++;const [doc]=await docsGet([item.p]).catch(()=>[null]);if(doc){doc.pf=1;doc.x="leitura profunda falhou: "+String(e.message||e).slice(0,60);lote.push(doc)}}
+        const ttF=aplicaFicha(doc,limpo,{preservaFc:true});Object.assign(doc,{pf:1,k:limpo?x.k:doc.k,r:fic&&fic.resumo?(fic.resumo+(vistas?" · vistas: "+vistas:"")).slice(0,420):limpo?limpo.slice(0,420):doc.r,t:[...new Set([...nomeT,...ttF,...termosDe(limpo.slice(0,900),60),...(fic?termosDe(fic.texto,90):[]),...termosDe(limpo,Math.min(320,60+Math.round(limpo.length/2000)))])]});if(fic){doc.fc=fic.texto.slice(0,3000);doc.dt="desenho"}doc.v=2;if(x.nota)doc.x=x.nota;if(limpo)mudou++;lote.push(doc)}
+      catch(e){PROF.erros++;const [doc]=await docsGet([item.p]).catch(()=>[null]);if(doc){doc.pf=1;doc.v=2;doc.x="leitura profunda falhou: "+String(e.message||e).slice(0,60);lote.push(doc)}}
       PROF.feitos++;if(lote.length>=25||Date.now()-ult>5000){await docsPut(lote.splice(0));ult=Date.now();avisa()}
       if(PROF.feitos%1500===0){await salvarIndice();await publicarMapa(raiz).catch(()=>{})}
       await new Promise(r=>setTimeout(r,0))}
